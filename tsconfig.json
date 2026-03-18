@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "target": "ESNext",
-    "module": "commonjs",
+    "module": "ESNext",
     "jsx": "react-jsx",
     "allowJs": true,
     "skipLibCheck": true,
@@ -13,7 +13,7 @@
       "@/*": ["src/*"]
     },
     "outDir": "dist",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "resolveJsonModule": true
   }
 }
