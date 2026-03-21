@@ -40,7 +40,7 @@ export function EtsySidebar() {
           <SidebarMenuItem>
             <div className="flex items-center gap-2">
               <div className="uppercase text-1xl font-semibold">{title}</div>
-              <Badge variant="outline">v {version}</Badge>
+              <Badge variant="outline">{version}</Badge>
             </div>
           </SidebarMenuItem>
         </SidebarMenu>
