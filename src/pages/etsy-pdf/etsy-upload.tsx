@@ -98,7 +98,6 @@ export default function EtsyUpload() {
         isComplete: false,
       }));
 
-      // Check for duplicates
       const existingKeys = new Set(files.map((f) => getFileKey(f.file)));
       const uniqueNewFiles = newFileItems.filter(
         (item) => !existingKeys.has(getFileKey(item.file)),
@@ -134,7 +133,6 @@ export default function EtsyUpload() {
       );
       resetStatus();
 
-      // Clear interval if exists
       const interval = intervalsRef.current.get(fileKey);
       if (interval) {
         clearInterval(interval);
@@ -187,7 +185,6 @@ export default function EtsyUpload() {
 
       resetStatus();
 
-      // Process files sequentially
       const processFile = (index: number) => {
         if (index >= files.length) {
           setSuccessMessage(`Đã xử lý ${files.length} tệp thành công.`);
@@ -197,7 +194,6 @@ export default function EtsyUpload() {
         const fileItem = files[index];
         const fileKey = getFileKey(fileItem.file);
 
-        // Update file status - uploading
         setFiles((prev) =>
           prev.map((item) =>
             getFileKey(item.file) === fileKey
@@ -219,7 +215,6 @@ export default function EtsyUpload() {
             clearInterval(interval);
             intervalsRef.current.delete(fileKey);
 
-            // Update file status - processing
             setFiles((prev) =>
               prev.map((item) =>
                 getFileKey(item.file) === fileKey
@@ -233,7 +228,6 @@ export default function EtsyUpload() {
               ),
             );
 
-            // Simulate processing delay
             setTimeout(() => {
               setFiles((prev) =>
                 prev.map((item) =>
@@ -247,7 +241,6 @@ export default function EtsyUpload() {
                 ),
               );
 
-              // Process next file
               processFile(index + 1);
             }, 500);
           } else {
@@ -294,30 +287,43 @@ export default function EtsyUpload() {
 
   const handleCopyAllContent = React.useCallback((): void => {
     if (parsedDataList.length === 0) {
-      toast.error("Không có dữ liệu để copy");
+      toast.error("Không có dữ liệu để sao chép");
       return;
     }
 
     const lines: string[] = [];
 
     parsedDataList.forEach((data) => {
+      const orderId = data.orderId ?? "";
+      const shipTo = data.shipTo ?? "";
+
       data.items.forEach((item) => {
         lines.push(
           [
+            orderId,
+            shipTo,
             item.title,
             item.sku,
             item.personalization,
-            item.quantity,
-            item.price,
-          ].join("\t")
+            String(item.quantity),
+            item.price.toFixed(2),
+          ].join("\t"),
         );
       });
     });
 
     const fullContent = lines.join("\n");
-    navigator.clipboard.writeText(fullContent).then(() => {
-      toast.success(`Đã copy toàn bộ nội dung từ ${parsedDataList.length} file`);
-    });
+
+    navigator.clipboard
+      .writeText(fullContent)
+      .then(() => {
+        toast.success(
+          `Đã sao chép toàn bộ nội dung từ ${parsedDataList.length} file`,
+        );
+      })
+      .catch(() => {
+        toast.error("Không thể sao chép dữ liệu");
+      });
   }, [parsedDataList]);
 
   React.useEffect(() => {
@@ -512,6 +518,7 @@ export default function EtsyUpload() {
           <div className="flex items-center justify-between gap-4">
             <h2 className="text-lg font-semibold">Kết quả xử lý</h2>
             <Button
+              type="button"
               size="sm"
               variant="outline"
               onClick={handleCopyAllContent}
@@ -521,6 +528,7 @@ export default function EtsyUpload() {
               Sao chép tất cả file
             </Button>
           </div>
+
           {parsedDataList.map((data, index) => (
             <EtsyResult key={index} data={data} />
           ))}

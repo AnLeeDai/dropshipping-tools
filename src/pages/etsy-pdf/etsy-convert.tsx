@@ -1,5 +1,6 @@
 import * as React from "react";
 import * as pdfjsLib from "pdfjs-dist";
+
 import type { ParsedEtsyItem, ParsedEtsyOrder } from "./etsy-result";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -56,34 +57,34 @@ function parseShipTo(text: string): string | null {
   return null;
 }
 
-function cleanItemBlock(block: string): string {
-  return block.replace(/\s+/g, " ").trim();
+function cleanTitle(rawTitle: string): string {
+  return rawTitle
+    .replace(/^Order\s*#\d+\s*/i, "")
+    .replace(/^\d+\s*items?\s*/i, "")
+    .trim();
 }
 
 function parseItemBlock(block: string): ParsedEtsyItem | null {
-  const cleanedBlock = cleanItemBlock(block);
+  const cleaned = normalizeText(block).replace(/\s+/g, " ").trim();
 
-  const titleMatch = cleanedBlock.match(/^(.*?)(?=\s+SKU:\s*[A-Z0-9]+)/i);
-  const skuMatch = cleanedBlock.match(/SKU:\s*([A-Z0-9]+)/i);
-  const personalizationMatch = cleanedBlock.match(
-    /Personalization:\s*(.*?)(?=\s+\d+\s*x\s*USD\s*\d+\.\d{2})/i,
-  );
-  const quantityMatch = cleanedBlock.match(/(\d+)\s*x\s*USD/i);
-  const priceMatch = cleanedBlock.match(/USD\s*(\d+\.\d{2})/i);
+  const sku = cleaned.match(/SKU:\s*([A-Z0-9]+)/i)?.[1]?.trim() ?? "";
 
-  const rawTitle = titleMatch?.[1]?.trim() ?? "";
-  let title = rawTitle.replace(/^Order\s*#\d+\s*/i, "").trim();
+  let title = cleaned.split(/SKU:/i)[0]?.trim() ?? "";
+  title = cleanTitle(title);
 
-  // Chuẩn hoá: nếu vẫn còn tiền tố không mong muốn, lấy nội dung từ "Personalized" tới "Cup" (hoặc giữ nguyên nếu không tìm thấy).
   const productTitleMatch = title.match(/(Personalized[\s\S]*?Cup)/i);
   if (productTitleMatch?.[1]) {
     title = productTitleMatch[1].trim();
   }
 
-  const sku = skuMatch?.[1]?.trim() ?? "";
-  const personalization = personalizationMatch?.[1]?.trim() ?? "";
-  const quantity = quantityMatch ? Number(quantityMatch[1]) : 0;
-  const price = priceMatch ? Number(priceMatch[1]) : 0;
+  const personalization =
+    cleaned
+      .match(/Personalization:\s*(.*?)(?=\s+\d+\s*x\s*USD\s*\d+\.\d{2})/i)?.[1]
+      ?.trim() ?? "";
+
+  const quantity = Number(cleaned.match(/(\d+)\s*x\s*USD/i)?.[1] ?? 0);
+
+  const price = Number(cleaned.match(/USD\s*(\d+\.\d{2})/i)?.[1] ?? 0);
 
   if (!title || !sku || !personalization || quantity <= 0 || price <= 0) {
     return null;
@@ -101,14 +102,39 @@ function parseItemBlock(block: string): ParsedEtsyItem | null {
 function parseItems(text: string): ParsedEtsyItem[] {
   const normalizedText = normalizeText(text);
 
-  const itemRegex =
-    /([A-Z][\s\S]*?SKU:\s*[A-Z0-9]+[\s\S]*?(?:Style|Size):[\s\S]*?Personalization:\s*[\s\S]*?\d+\s*x\s*USD\s*\d+\.\d{2})/g;
+  const skuMatches = [...normalizedText.matchAll(/SKU:\s*[A-Z0-9]+/gi)];
 
-  const matches = normalizedText.match(itemRegex) ?? [];
+  if (skuMatches.length === 0) {
+    return [];
+  }
 
-  const parsedItems: ParsedEtsyItem[] = matches
-    .map((block) => parseItemBlock(block))
-    .filter((item): item is ParsedEtsyItem => item !== null);
+  const blocks = skuMatches.map((match, index) => {
+    const skuIndex = match.index ?? 0;
+
+    let start = normalizedText.lastIndexOf("Personalized", skuIndex);
+    if (start === -1) {
+      start = normalizedText.lastIndexOf("\n", skuIndex);
+    }
+    if (start === -1) {
+      start = Math.max(0, skuIndex - 120);
+    }
+
+    const end =
+      index < skuMatches.length - 1
+        ? (skuMatches[index + 1].index ?? normalizedText.length)
+        : normalizedText.length;
+
+    return normalizedText.slice(start, end).trim();
+  });
+
+  const parsedItems: ParsedEtsyItem[] = [];
+
+  for (const block of blocks) {
+    const parsed = parseItemBlock(block);
+    if (parsed) {
+      parsedItems.push(parsed);
+    }
+  }
 
   return parsedItems;
 }
