@@ -11,7 +11,9 @@ export default [
     files: ['**/*.{ts,tsx}'],
     settings: {
       'import/resolver': {
-        typescript: true,
+        typescript: {
+          project: './tsconfig.json',
+        },
         node: true,
       },
     },
