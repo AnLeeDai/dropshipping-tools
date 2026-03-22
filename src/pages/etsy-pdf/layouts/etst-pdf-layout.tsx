@@ -15,7 +15,7 @@ export default function EtstPDFLayout() {
       <EtsySidebar />
 
       <main className="flex-1 px-4 py-6">
-        <div className="flex items-center gap-5">
+        <div className="flex items-center gap-5 sticky top-0 bg-background z-10 border-b shadow-sm py-2">
           <Tooltip>
             <TooltipTrigger asChild>
               <SidebarTrigger />
