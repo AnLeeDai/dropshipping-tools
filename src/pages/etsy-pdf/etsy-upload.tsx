@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import EtsyConvert from "./etsy-convert";
-import EtsyResult, { type ParsedEtsyOrder } from "./etsy-result";
+import EtsyResult, { type ParsedEtsyRow } from "./etsy-result";
 
 interface FileUploadItem {
   file: File;
@@ -29,7 +29,7 @@ export default function EtsyUpload() {
   const [isDragging, setIsDragging] = React.useState(false);
   const [errorMessage, setErrorMessage] = React.useState("");
   const [successMessage, setSuccessMessage] = React.useState("");
-  const [parsedDataList, setParsedDataList] = React.useState<ParsedEtsyOrder[]>(
+  const [parsedDataList, setParsedDataList] = React.useState<ParsedEtsyRow[][]>(
     [],
   );
 
@@ -184,6 +184,7 @@ export default function EtsyUpload() {
       }
 
       resetStatus();
+      setParsedDataList([]);
 
       const processFile = (index: number) => {
         if (index >= files.length) {
@@ -202,6 +203,7 @@ export default function EtsyUpload() {
                   isUploading: true,
                   progress: 0,
                   isProcessing: false,
+                  isComplete: false,
                 }
               : item,
           ),
@@ -262,14 +264,11 @@ export default function EtsyUpload() {
     [files, resetStatus],
   );
 
-  const handleParsed = React.useCallback(
-    (data: ParsedEtsyOrder | null): void => {
-      if (data) {
-        setParsedDataList((prev) => [...prev, data]);
-      }
-    },
-    [],
-  );
+  const handleParsed = React.useCallback((data: ParsedEtsyRow[]): void => {
+    if (data.length > 0) {
+      setParsedDataList((prev) => [...prev, data]);
+    }
+  }, []);
 
   const handleClearAll = React.useCallback((): void => {
     files.forEach((item) => {
@@ -293,20 +292,18 @@ export default function EtsyUpload() {
 
     const lines: string[] = [];
 
-    parsedDataList.forEach((data) => {
-      const orderId = data.orderId ?? "";
-      const shipTo = data.shipTo ?? "";
-
-      data.items.forEach((item) => {
+    parsedDataList.forEach((rows) => {
+      rows.forEach((row) => {
         lines.push(
           [
-            orderId,
-            shipTo,
-            item.title,
-            item.sku,
-            item.personalization,
-            String(item.quantity),
-            item.price.toFixed(2),
+            row.orderId,
+            row.shipTo,
+            row.title,
+            row.sku,
+            row.variation,
+            row.personalization,
+            String(row.quantity),
+            row.unitPrice.toFixed(2),
           ].join("\t"),
         );
       });
@@ -402,7 +399,7 @@ export default function EtsyUpload() {
                   </h3>
                 </div>
 
-                <div className="space-y-3 max-h-96 overflow-y-auto">
+                <div className="max-h-96 space-y-3 overflow-y-auto">
                   {files.map((item) => {
                     const fileKey = getFileKey(item.file);
                     const isProcessing = item.isUploading || item.isProcessing;
@@ -430,7 +427,7 @@ export default function EtsyUpload() {
 
                           <div className="flex items-center gap-2">
                             {item.isComplete && (
-                              <span className="text-xs px-2 py-1 rounded-full bg-green-100 text-green-800">
+                              <span className="rounded-full bg-green-100 px-2 py-1 text-xs text-green-800">
                                 Hoàn thành
                               </span>
                             )}

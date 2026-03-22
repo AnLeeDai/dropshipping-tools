@@ -1,21 +1,28 @@
 import * as React from "react";
 import * as pdfjsLib from "pdfjs-dist";
 
-import type { ParsedEtsyItem, ParsedEtsyOrder } from "./etsy-result";
-
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
   import.meta.url,
 ).toString();
 
-type EtsyConvertProps = {
-  file: File | null;
-  onParsed?: (data: ParsedEtsyOrder | null) => void;
+export type ParsedEtsyRow = {
+  orderId: string;
+  shipTo: string;
+  title: string;
+  sku: string;
+  variation: string;
+  personalization: string;
+  quantity: number;
+  unitPrice: number;
 };
 
-type PdfTextItem = {
-  str: string;
+type EtsyConvertProps = {
+  file: File | null;
+  onParsed?: (data: ParsedEtsyRow[]) => void;
 };
+
+type PdfTextItem = { str: string };
 
 function isTextItem(item: unknown): item is PdfTextItem {
   return (
@@ -26,183 +33,218 @@ function isTextItem(item: unknown): item is PdfTextItem {
   );
 }
 
-function normalizeText(value: string): string {
+function normalizeLine(value: string): string {
   return value
-    .replace(/\r/g, " ")
     .replace(/\u00a0/g, " ")
     .replace(/[ \t]+/g, " ")
-    .replace(/\n{2,}/g, "\n")
     .trim();
 }
 
-function parseOrderId(text: string): string | null {
-  const match = text.match(/Order\s*#(\d+)/i);
-  return match?.[1] ?? null;
+function cleanLines(lines: string[]): string[] {
+  return lines.map(normalizeLine).filter(Boolean);
 }
 
-function parseShipTo(text: string): string | null {
-  const patterns = [
-    /Ship to\s*([\s\S]*?)\s*Scheduled to ship by/i,
-    /Ship to\s*([\s\S]*?)\s*Shop\s/i,
-    /Ship to\s*([\s\S]*?)\s*Order date/i,
+function extractPageLines(textContent): string[] {
+  return cleanLines(
+    textContent.items.map((item: unknown) =>
+      isTextItem(item) ? item.str : "",
+    ),
+  );
+}
+
+function getOrderId(lines: string[]): string {
+  for (const line of lines) {
+    const match = line.match(/Order\s*#(\d+)/i);
+    if (match) return match[1];
+  }
+  return "";
+}
+
+function getShipTo(lines: string[]): string {
+  const startIndex = lines.findIndex(
+    (line) => /^Ship to$/i.test(line) || /^Deliver to$/i.test(line),
+  );
+  if (startIndex === -1) return "";
+
+  const stopPatterns = [
+    /^Scheduled to ship by$/i,
+    /^Scheduled to dispatch by$/i,
+    /^Shop$/i,
+    /^From$/i,
+    /^Order date$/i,
+    /^Payment method$/i,
+    /^\d+\s+items?$/i,
   ];
 
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match?.[1]) {
-      return match[1].replace(/\s+/g, " ").trim();
-    }
+  const addressLines: string[] = [];
+
+  for (let i = startIndex + 1; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (stopPatterns.some((pattern) => pattern.test(line))) break;
+    addressLines.push(line);
   }
 
-  return null;
+  return addressLines.join(", ");
 }
 
-function cleanTitle(rawTitle: string): string {
-  return rawTitle
-    .replace(/^Order\s*#\d+\s*/i, "")
-    .replace(/^\d+\s*items?\s*/i, "")
-    .trim();
+function isMetaLine(line: string): boolean {
+  return (
+    /^Order\s*#\d+/i.test(line) ||
+    /^Ship to$/i.test(line) ||
+    /^Deliver to$/i.test(line) ||
+    /^Scheduled to ship by$/i.test(line) ||
+    /^Scheduled to dispatch by$/i.test(line) ||
+    /^Shop$/i.test(line) ||
+    /^Order date$/i.test(line) ||
+    /^Payment method$/i.test(line) ||
+    /^Item total\b/i.test(line) ||
+    /^Shop discount\b/i.test(line) ||
+    /^Shipping total\b/i.test(line) ||
+    /^Delivery total\b/i.test(line) ||
+    /^Subtotal\b/i.test(line) ||
+    /^Tax\b/i.test(line) ||
+    /^Order total\b/i.test(line) ||
+    /^Do the green thing$/i.test(line)
+  );
 }
 
-function parseItemBlock(block: string): ParsedEtsyItem | null {
-  const cleaned = normalizeText(block).replace(/\s+/g, " ").trim();
+function parseItems(
+  lines: string[],
+  orderId: string,
+  shipTo: string,
+): ParsedEtsyRow[] {
+  const skuIndexes = lines
+    .map((line, index) => ({ line, index }))
+    .filter(({ line }) => /^SKU:\s*/i.test(line))
+    .map(({ index }) => index);
 
-  const sku = cleaned.match(/SKU:\s*([A-Z0-9]+)/i)?.[1]?.trim() ?? "";
+  if (skuIndexes.length === 0) return [];
 
-  let title = cleaned.split(/SKU:/i)[0]?.trim() ?? "";
-  title = cleanTitle(title);
+  return skuIndexes
+    .map((skuIndex, idx) => {
+      const nextSkuIndex =
+        idx < skuIndexes.length - 1 ? skuIndexes[idx + 1] : lines.length;
 
-  const productTitleMatch = title.match(/(Personalized[\s\S]*?Cup)/i);
-  if (productTitleMatch?.[1]) {
-    title = productTitleMatch[1].trim();
-  }
+      // ===== TITLE =====
+      const titleLines: string[] = [];
 
-  const personalization =
-    cleaned
-      .match(/Personalization:\s*(.*?)(?=\s+\d+\s*x\s*USD\s*\d+\.\d{2})/i)?.[1]
-      ?.trim() ?? "";
+      for (let i = skuIndex - 1; i >= 0; i -= 1) {
+        const line = lines[i];
 
-  const quantity = Number(cleaned.match(/(\d+)\s*x\s*USD/i)?.[1] ?? 0);
+        if (
+          /^\d+\s+items?$/i.test(line) ||
+          isMetaLine(line) ||
+          /\(\S+\)/.test(line)
+        ) {
+          break;
+        }
 
-  const price = Number(cleaned.match(/USD\s*(\d+\.\d{2})/i)?.[1] ?? 0);
+        if (
+          /^Personalization:/i.test(line) ||
+          /^\d+\s*x\s+[A-Z]{3}\s+\d+(\.\d{2})?$/i.test(line)
+        ) {
+          break;
+        }
 
-  if (!title || !sku || !personalization || quantity <= 0 || price <= 0) {
-    return null;
-  }
+        titleLines.unshift(line);
+      }
 
-  return {
-    title,
-    sku,
-    personalization,
-    quantity,
-    price,
-  };
+      // ===== DETAILS =====
+      let variationParts: string[] = [];
+      let personalization = "";
+      let quantity = 0;
+      let unitPrice = 0;
+
+      for (let i = skuIndex + 1; i < nextSkuIndex; i += 1) {
+        const line = lines[i];
+
+        if (/^(Type|Size|Style):/i.test(line)) {
+          variationParts.push(
+            line.replace(/^(Type|Size|Style):\s*/i, "").trim(),
+          );
+          continue;
+        }
+
+        const p = line.match(/^Personalization:\s*(.*)$/i);
+        if (p) {
+          personalization = p[1].trim();
+          continue;
+        }
+
+        const q = line.match(/^(\d+)\s*x\s+[A-Z]{3}\s+(\d+(?:\.\d{2})?)$/i);
+        if (q) {
+          quantity = Number(q[1]);
+          unitPrice = Number(q[2]);
+          break;
+        }
+
+        if (isMetaLine(line)) break;
+      }
+
+      return {
+        orderId,
+        shipTo,
+        title: titleLines.join(" ").trim(),
+        sku: lines[skuIndex].replace(/^SKU:\s*/i, "").trim(),
+        variation: variationParts.join(" | "),
+        personalization,
+        quantity,
+        unitPrice,
+      };
+    })
+    .filter(
+      (row) =>
+        row.orderId && row.shipTo && row.title && row.sku && row.quantity > 0,
+    );
 }
 
-function parseItems(text: string): ParsedEtsyItem[] {
-  const normalizedText = normalizeText(text);
+async function extractOrdersFromPdf(file: File): Promise<ParsedEtsyRow[]> {
+  const buffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({
+    data: new Uint8Array(buffer),
+  }).promise;
 
-  const skuMatches = [...normalizedText.matchAll(/SKU:\s*[A-Z0-9]+/gi)];
+  const rows: ParsedEtsyRow[] = [];
 
-  if (skuMatches.length === 0) {
-    return [];
-  }
-
-  const blocks = skuMatches.map((match, index) => {
-    const skuIndex = match.index ?? 0;
-
-    let start = normalizedText.lastIndexOf("Personalized", skuIndex);
-    if (start === -1) {
-      start = normalizedText.lastIndexOf("\n", skuIndex);
-    }
-    if (start === -1) {
-      start = Math.max(0, skuIndex - 120);
-    }
-
-    const end =
-      index < skuMatches.length - 1
-        ? (skuMatches[index + 1].index ?? normalizedText.length)
-        : normalizedText.length;
-
-    return normalizedText.slice(start, end).trim();
-  });
-
-  const parsedItems: ParsedEtsyItem[] = [];
-
-  for (const block of blocks) {
-    const parsed = parseItemBlock(block);
-    if (parsed) {
-      parsedItems.push(parsed);
-    }
-  }
-
-  return parsedItems;
-}
-
-function parseEtsyPdfText(fullText: string): ParsedEtsyOrder {
-  const normalizedText = normalizeText(fullText);
-
-  return {
-    orderId: parseOrderId(normalizedText),
-    shipTo: parseShipTo(normalizedText),
-    items: parseItems(normalizedText),
-    rawText: normalizedText,
-  };
-}
-
-async function extractTextFromPdf(selectedFile: File): Promise<string> {
-  const arrayBuffer = await selectedFile.arrayBuffer();
-  const uint8Array = new Uint8Array(arrayBuffer);
-
-  const pdf = await pdfjsLib.getDocument({ data: uint8Array }).promise;
-  const pagesText: string[] = [];
-
-  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
     const page = await pdf.getPage(pageNumber);
     const textContent = await page.getTextContent();
+    const lines = extractPageLines(textContent);
 
-    const pageText = textContent.items
-      .map((item) => (isTextItem(item) ? item.str : ""))
-      .join(" ")
-      .replace(/\s+/g, " ")
-      .trim();
+    // 👉 chỉ lấy trang có SKU
+    if (!lines.some((line) => /^SKU:/i.test(line))) continue;
 
-    pagesText.push(pageText);
+    const orderId = getOrderId(lines);
+    const shipTo = getShipTo(lines);
+
+    if (!orderId || !shipTo) continue;
+
+    rows.push(...parseItems(lines, orderId, shipTo));
   }
 
-  return pagesText.join("\n");
+  return rows;
 }
 
 export default function EtsyConvert({ file, onParsed }: EtsyConvertProps) {
   React.useEffect(() => {
     let cancelled = false;
 
-    async function run(): Promise<void> {
+    async function run() {
       if (!file) {
-        onParsed?.(null);
+        onParsed?.([]);
         return;
       }
 
       try {
-        const fullText = await extractTextFromPdf(file);
+        const parsed = await extractOrdersFromPdf(file);
 
-        if (cancelled) {
-          return;
+        if (!cancelled) {
+          onParsed?.(parsed);
         }
-
-        const parsed = parseEtsyPdfText(fullText);
-
-        if (cancelled) {
-          return;
-        }
-
-        onParsed?.(parsed);
       } catch {
-        if (cancelled) {
-          return;
+        if (!cancelled) {
+          onParsed?.([]);
         }
-
-        onParsed?.(null);
       }
     }
 
