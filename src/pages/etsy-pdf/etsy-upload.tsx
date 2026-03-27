@@ -144,13 +144,10 @@ export default function EtsyUpload() {
       reset();
       setParsedDataList([]);
 
-      const processFile = (index: number) => {
-        if (index >= files.length) {
-          setSuccess(`Đã xử lý ${files.length} tệp thành công.`);
-          return;
-        }
+      let completedCount = 0;
 
-        const fileItem = files[index];
+      // Process all files in parallel
+      files.forEach((fileItem) => {
         const fileKey = getFileKey(fileItem.file);
 
         updateFileItem(fileKey, {
@@ -161,11 +158,12 @@ export default function EtsyUpload() {
         });
 
         startProgressSimulation(fileKey, () => {
-          processFile(index + 1);
+          completedCount += 1;
+          if (completedCount === files.length) {
+            setSuccess(`Đã xử lý ${files.length} tệp thành công.`);
+          }
         });
-      };
-
-      processFile(0);
+      });
     },
     [
       files,

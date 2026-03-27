@@ -23,6 +23,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { convertRowsToTabSeparated, copyToClipboard } from "@/lib/file-utils";
 
 export type ParsedEtsyRow = {
   orderId: string;
@@ -78,20 +79,8 @@ function WrapCell({ value, className }: { value: string; className?: string }) {
 export default function EtsyResult({ data }: EtsyResultProps) {
   const copyAll = async () => {
     try {
-      const rows = data.map((r) =>
-        [
-          r.orderId,
-          r.shipTo,
-          r.title,
-          r.sku,
-          r.variation,
-          r.personalization,
-          r.quantity,
-          r.unitPrice.toFixed(2),
-        ].join("\t"),
-      );
-
-      await navigator.clipboard.writeText(rows.join("\n"));
+      const content = convertRowsToTabSeparated(data);
+      await copyToClipboard(content);
       toast.success(`Đã copy ${data.length} dòng`);
     } catch {
       toast.error("Copy thất bại");
