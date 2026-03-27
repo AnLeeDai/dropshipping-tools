@@ -44,7 +44,7 @@ function cleanLines(lines: string[]): string[] {
   return lines.map(normalizeLine).filter(Boolean);
 }
 
-function extractPageLines(textContent): string[] {
+function extractPageLines(textContent: { items: unknown[] }): string[] {
   return cleanLines(
     textContent.items.map((item: unknown) =>
       isTextItem(item) ? item.str : "",
@@ -64,6 +64,7 @@ function getShipTo(lines: string[]): string {
   const startIndex = lines.findIndex(
     (line) => /^Ship to$/i.test(line) || /^Deliver to$/i.test(line),
   );
+
   if (startIndex === -1) return "";
 
   const stopPatterns = [
@@ -95,8 +96,10 @@ function isMetaLine(line: string): boolean {
     /^Scheduled to ship by$/i.test(line) ||
     /^Scheduled to dispatch by$/i.test(line) ||
     /^Shop$/i.test(line) ||
+    /^From$/i.test(line) ||
     /^Order date$/i.test(line) ||
     /^Payment method$/i.test(line) ||
+    /^Buyer$/i.test(line) ||
     /^Item total\b/i.test(line) ||
     /^Shop discount\b/i.test(line) ||
     /^Shipping total\b/i.test(line) ||
@@ -104,7 +107,16 @@ function isMetaLine(line: string): boolean {
     /^Subtotal\b/i.test(line) ||
     /^Tax\b/i.test(line) ||
     /^Order total\b/i.test(line) ||
-    /^Do the green thing$/i.test(line)
+    /^Do the green thing$/i.test(line) ||
+    /^Climate Impact Plan$/i.test(line) ||
+    /^Love what you bought\?$/i.test(line)
+  );
+}
+
+function isVariationLine(line: string): boolean {
+  return (
+    /^(Type|Size|Style|Color|Material|Finish|Pattern):/i.test(line) ||
+    /^Option\b.*:/i.test(line)
   );
 }
 
@@ -125,7 +137,6 @@ function parseItems(
       const nextSkuIndex =
         idx < skuIndexes.length - 1 ? skuIndexes[idx + 1] : lines.length;
 
-      // ===== TITLE =====
       const titleLines: string[] = [];
 
       for (let i = skuIndex - 1; i >= 0; i -= 1) {
@@ -149,25 +160,42 @@ function parseItems(
         titleLines.unshift(line);
       }
 
-      // ===== DETAILS =====
-      let variationParts: string[] = [];
-      let personalization = "";
+      const variationParts: string[] = [];
+      const personalizationParts: string[] = [];
       let quantity = 0;
       let unitPrice = 0;
 
       for (let i = skuIndex + 1; i < nextSkuIndex; i += 1) {
         const line = lines[i];
 
-        if (/^(Type|Size|Style):/i.test(line)) {
-          variationParts.push(
-            line.replace(/^(Type|Size|Style):\s*/i, "").trim(),
-          );
+        if (isVariationLine(line)) {
+          variationParts.push(line.trim());
           continue;
         }
 
         const p = line.match(/^Personalization:\s*(.*)$/i);
         if (p) {
-          personalization = p[1].trim();
+          if (p[1]) {
+            personalizationParts.push(p[1].trim());
+          }
+
+          for (let j = i + 1; j < nextSkuIndex; j += 1) {
+            const nextLine = lines[j];
+
+            if (
+              /^SKU:/i.test(nextLine) ||
+              isVariationLine(nextLine) ||
+              /^Personalization:/i.test(nextLine) ||
+              /^\d+\s*x\s+[A-Z]{3}\s+(\d+(?:\.\d{2})?)$/i.test(nextLine) ||
+              isMetaLine(nextLine)
+            ) {
+              break;
+            }
+
+            personalizationParts.push(nextLine.trim());
+            i = j;
+          }
+
           continue;
         }
 
@@ -187,7 +215,7 @@ function parseItems(
         title: titleLines.join(" ").trim(),
         sku: lines[skuIndex].replace(/^SKU:\s*/i, "").trim(),
         variation: variationParts.join(" | "),
-        personalization,
+        personalization: personalizationParts.join(" | "),
         quantity,
         unitPrice,
       };
@@ -206,12 +234,11 @@ async function extractOrdersFromPdf(file: File): Promise<ParsedEtsyRow[]> {
 
   const rows: ParsedEtsyRow[] = [];
 
-  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
     const page = await pdf.getPage(pageNumber);
     const textContent = await page.getTextContent();
     const lines = extractPageLines(textContent);
 
-    // 👉 chỉ lấy trang có SKU
     if (!lines.some((line) => /^SKU:/i.test(line))) continue;
 
     const orderId = getOrderId(lines);

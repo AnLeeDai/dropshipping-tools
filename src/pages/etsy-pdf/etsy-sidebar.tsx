@@ -13,9 +13,9 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { Badge } from "@/components/ui/badge";
-import { siteConfig } from "@/config/site-config";
+import { siteConfig, appVersion } from "@/config/site-config";
 
-const version = "0.0.1";
+const version = appVersion.etsyPdf;
 const title = "Chuyển đổi đơn hàng Etsy sang PDF";
 
 const menuItems = [

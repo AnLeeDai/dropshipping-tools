@@ -8,3 +8,7 @@ export const siteConfig = {
     compare: "/compare",
   },
 };
+
+export const appVersion = {
+  etsyPdf: "0.0.2",
+};
