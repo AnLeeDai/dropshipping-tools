@@ -12,62 +12,37 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
+import { useFileUpload } from "@/hooks/use-file-upload";
+import { useStatusMessage } from "@/hooks/use-status-message";
+import {
+  validatePdfFile,
+  convertRowsToTabSeparated,
+  copyToClipboard,
+} from "@/lib/file-utils";
 import EtsyConvert from "./etsy-convert";
 import EtsyResult, { type ParsedEtsyRow } from "./etsy-result";
 
-interface FileUploadItem {
-  file: File;
-  progress: number;
-  isUploading: boolean;
-  isProcessing: boolean;
-  isComplete: boolean;
-  error?: string;
-}
-
 export default function EtsyUpload() {
-  const [files, setFiles] = React.useState<FileUploadItem[]>([]);
   const [isDragging, setIsDragging] = React.useState(false);
-  const [errorMessage, setErrorMessage] = React.useState("");
-  const [successMessage, setSuccessMessage] = React.useState("");
   const [parsedDataList, setParsedDataList] = React.useState<ParsedEtsyRow[][]>(
     [],
   );
 
   const inputRef = React.useRef<HTMLInputElement | null>(null);
-  const intervalsRef = React.useRef<
-    Map<string, ReturnType<typeof setInterval>>
-  >(new Map());
-
-  const resetStatus = React.useCallback((): void => {
-    setErrorMessage("");
-    setSuccessMessage("");
-  }, []);
-
-  const validatePdfFile = React.useCallback(
-    (selectedFile: File | null): boolean => {
-      if (!selectedFile) {
-        return false;
-      }
-
-      const isPdfType = selectedFile.type === "application/pdf";
-      const isPdfExtension = selectedFile.name.toLowerCase().endsWith(".pdf");
-
-      if (!isPdfType && !isPdfExtension) {
-        return false;
-      }
-
-      return true;
-    },
-    [],
-  );
-
-  const getFileKey = (file: File): string => {
-    return `${file.name}-${file.size}-${file.lastModified}`;
-  };
+  const {
+    files,
+    getFileKey,
+    updateFileItem,
+    removeFile,
+    addFiles,
+    startProgressSimulation,
+    clearAll: clearAllFiles,
+  } = useFileUpload();
+  const { reset, setError, setSuccess } = useStatusMessage();
 
   const handleSetFiles = React.useCallback(
     (selectedFiles: File[] | null): void => {
-      resetStatus();
+      reset();
 
       if (!selectedFiles || selectedFiles.length === 0) {
         return;
@@ -76,8 +51,7 @@ export default function EtsyUpload() {
       const validFiles = selectedFiles.filter((f) => validatePdfFile(f));
 
       if (validFiles.length === 0) {
-        setErrorMessage("Vui lòng chọn một hoặc nhiều tệp PDF hợp lệ.");
-        setSuccessMessage("");
+        setError("Vui lòng chọn một hoặc nhiều tệp PDF hợp lệ.");
         if (inputRef.current) {
           inputRef.current.value = "";
         }
@@ -85,12 +59,12 @@ export default function EtsyUpload() {
       }
 
       if (validFiles.length < selectedFiles.length) {
-        setErrorMessage(
+        setError(
           `${selectedFiles.length - validFiles.length} tệp không hợp lệ (chỉ PDF được hỗ trợ).`,
         );
       }
 
-      const newFileItems: FileUploadItem[] = validFiles.map((file) => ({
+      const newFileItems = validFiles.map((file) => ({
         file,
         progress: 0,
         isUploading: false,
@@ -98,22 +72,17 @@ export default function EtsyUpload() {
         isComplete: false,
       }));
 
-      const existingKeys = new Set(files.map((f) => getFileKey(f.file)));
-      const uniqueNewFiles = newFileItems.filter(
-        (item) => !existingKeys.has(getFileKey(item.file)),
-      );
+      const { duplicates } = addFiles(newFileItems);
 
-      if (uniqueNewFiles.length < newFileItems.length) {
+      if (duplicates > 0) {
         toast.warning("Một số tệp đã tồn tại trong danh sách.");
       }
-
-      setFiles((prev) => [...prev, ...uniqueNewFiles]);
 
       if (inputRef.current) {
         inputRef.current.value = "";
       }
     },
-    [files, resetStatus, validatePdfFile],
+    [reset, setError, addFiles],
   );
 
   const handleChangeFile = React.useCallback(
@@ -128,18 +97,10 @@ export default function EtsyUpload() {
 
   const handleRemoveFile = React.useCallback(
     (fileKey: string): void => {
-      setFiles((prev) =>
-        prev.filter((item) => getFileKey(item.file) !== fileKey),
-      );
-      resetStatus();
-
-      const interval = intervalsRef.current.get(fileKey);
-      if (interval) {
-        clearInterval(interval);
-        intervalsRef.current.delete(fileKey);
-      }
+      removeFile(fileKey);
+      reset();
     },
-    [resetStatus],
+    [removeFile, reset],
   );
 
   const handleOpenFileDialog = React.useCallback((): void => {
@@ -176,92 +137,45 @@ export default function EtsyUpload() {
       event.preventDefault();
 
       if (files.length === 0) {
-        setErrorMessage(
-          "Vui lòng chọn một hoặc nhiều tệp PDF trước khi tải lên.",
-        );
-        setSuccessMessage("");
+        setError("Vui lòng chọn một hoặc nhiều tệp PDF trước khi tải lên.");
         return;
       }
 
-      resetStatus();
+      reset();
       setParsedDataList([]);
 
       const processFile = (index: number) => {
         if (index >= files.length) {
-          setSuccessMessage(`Đã xử lý ${files.length} tệp thành công.`);
+          setSuccess(`Đã xử lý ${files.length} tệp thành công.`);
           return;
         }
 
         const fileItem = files[index];
         const fileKey = getFileKey(fileItem.file);
 
-        setFiles((prev) =>
-          prev.map((item) =>
-            getFileKey(item.file) === fileKey
-              ? {
-                  ...item,
-                  isUploading: true,
-                  progress: 0,
-                  isProcessing: false,
-                  isComplete: false,
-                }
-              : item,
-          ),
-        );
+        updateFileItem(fileKey, {
+          isUploading: true,
+          progress: 0,
+          isProcessing: false,
+          isComplete: false,
+        });
 
-        let progress = 0;
-        const interval = setInterval(() => {
-          progress += 25;
-
-          if (progress >= 100) {
-            clearInterval(interval);
-            intervalsRef.current.delete(fileKey);
-
-            setFiles((prev) =>
-              prev.map((item) =>
-                getFileKey(item.file) === fileKey
-                  ? {
-                      ...item,
-                      isUploading: false,
-                      isProcessing: true,
-                      progress: 100,
-                    }
-                  : item,
-              ),
-            );
-
-            setTimeout(() => {
-              setFiles((prev) =>
-                prev.map((item) =>
-                  getFileKey(item.file) === fileKey
-                    ? {
-                        ...item,
-                        isProcessing: false,
-                        isComplete: true,
-                      }
-                    : item,
-                ),
-              );
-
-              processFile(index + 1);
-            }, 500);
-          } else {
-            setFiles((prev) =>
-              prev.map((item) =>
-                getFileKey(item.file) === fileKey
-                  ? { ...item, progress }
-                  : item,
-              ),
-            );
-          }
-        }, 120);
-
-        intervalsRef.current.set(fileKey, interval);
+        startProgressSimulation(fileKey, () => {
+          processFile(index + 1);
+        });
       };
 
       processFile(0);
     },
-    [files, resetStatus],
+    [
+      files,
+      reset,
+      setError,
+      setSuccess,
+      getFileKey,
+      updateFileItem,
+      startProgressSimulation,
+    ],
   );
 
   const handleParsed = React.useCallback((data: ParsedEtsyRow[]): void => {
@@ -271,18 +185,10 @@ export default function EtsyUpload() {
   }, []);
 
   const handleClearAll = React.useCallback((): void => {
-    files.forEach((item) => {
-      const interval = intervalsRef.current.get(getFileKey(item.file));
-      if (interval) {
-        clearInterval(interval);
-        intervalsRef.current.delete(getFileKey(item.file));
-      }
-    });
-
-    setFiles([]);
+    clearAllFiles();
     setParsedDataList([]);
-    resetStatus();
-  }, [files, resetStatus]);
+    reset();
+  }, [clearAllFiles, reset]);
 
   const handleCopyAllContent = React.useCallback((): void => {
     if (parsedDataList.length === 0) {
@@ -291,28 +197,13 @@ export default function EtsyUpload() {
     }
 
     const lines: string[] = [];
-
     parsedDataList.forEach((rows) => {
-      rows.forEach((row) => {
-        lines.push(
-          [
-            row.orderId,
-            row.shipTo,
-            row.title,
-            row.sku,
-            row.variation,
-            row.personalization,
-            String(row.quantity),
-            row.unitPrice.toFixed(2),
-          ].join("\t"),
-        );
-      });
+      lines.push(convertRowsToTabSeparated(rows));
     });
 
     const fullContent = lines.join("\n");
 
-    navigator.clipboard
-      .writeText(fullContent)
+    copyToClipboard(fullContent)
       .then(() => {
         toast.success(
           `Đã sao chép toàn bộ nội dung từ ${parsedDataList.length} file`,
@@ -322,27 +213,6 @@ export default function EtsyUpload() {
         toast.error("Không thể sao chép dữ liệu");
       });
   }, [parsedDataList]);
-
-  React.useEffect(() => {
-    if (errorMessage) {
-      toast.error(errorMessage);
-    }
-  }, [errorMessage]);
-
-  React.useEffect(() => {
-    if (successMessage) {
-      toast.success(successMessage);
-    }
-  }, [successMessage]);
-
-  React.useEffect(() => {
-    return () => {
-      intervalsRef.current.forEach((interval) => {
-        clearInterval(interval);
-      });
-      intervalsRef.current.clear();
-    };
-  }, []);
 
   return (
     <div className="w-full space-y-6">
