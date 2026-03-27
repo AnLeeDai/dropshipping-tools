@@ -2,7 +2,6 @@ import { FileText, GitCompare } from "lucide-react";
 
 import CardFeatures from "@/components/card-features";
 import { siteConfig } from "@/config/site-config";
-import { ModeToggle } from "@/components/mode-toggle";
 
 const features = [
   {
@@ -24,15 +23,11 @@ const features = [
 export default function HomePage() {
   return (
     <div className="container mx-auto px-4 py-8">
-      <div className="flex justify-center gap-5 items-center">
-        <div className="mb-8 text-center">
-          <h1 className="text-3xl font-bold">Danh sách tính năng</h1>
-          <p className="text-muted-foreground mt-2">
-            Chọn chức năng bạn muốn truy cập
-          </p>
-        </div>
-
-        <ModeToggle />
+      <div className="mb-8 text-center">
+        <h1 className="text-3xl font-bold">Danh sách tính năng</h1>
+        <p className="text-muted-foreground mt-2">
+          Chọn chức năng bạn muốn truy cập
+        </p>
       </div>
 
       <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">

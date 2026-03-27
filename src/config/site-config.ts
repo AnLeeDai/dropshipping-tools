@@ -1,10 +1,9 @@
 export const siteConfig = {
   routes: {
     home: "/",
-
+    settings: "/settings",
     etsyPdf: "/etsy-pdf",
     etsyPdfConverter: "/etsy-pdf-converter",
-
     compare: "/compare",
   },
 };
