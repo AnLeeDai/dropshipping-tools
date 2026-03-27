@@ -1,180 +1,170 @@
 import * as React from "react";
-import { Download, AlertCircle, X } from "lucide-react";
+import { ArrowUpCircle, CheckCircle2, Download, FileText, Info } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
-import { useUpdater } from "@/hooks/use-updater";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Separator } from "@/components/ui/separator";
 import { useUpdateSettings } from "@/hooks/use-update-settings";
+import { useUpdater } from "@/hooks/use-updater";
 
 interface UpdateDialogProps {
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }
 
+function formatReleaseDate(date: string | null | undefined) {
+  if (!date) {
+    return "Không xác định";
+  }
+
+  const parsedDate = new Date(date);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return "Không xác định";
+  }
+
+  return parsedDate.toLocaleDateString("vi-VN", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
+
 export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
-  const { updateInfo, isDownloading, downloadProgress, error, isUpdateReady, quitAndInstall } =
-    useUpdater();
+  const { updateInfo, isDownloading, error, isUpdateReady, quitAndInstall } = useUpdater();
   const [isOpen, setIsOpen] = React.useState(open ?? updateInfo.hasUpdate);
   const [isInstalling, setIsInstalling] = React.useState(false);
 
   React.useEffect(() => {
     if (open !== undefined) {
       setIsOpen(open);
-    } else {
-      setIsOpen(updateInfo.hasUpdate);
+      return;
     }
+
+    setIsOpen(updateInfo.hasUpdate);
   }, [open, updateInfo.hasUpdate]);
 
-  const handleOpenChange = (newOpen: boolean) => {
-    setIsOpen(newOpen);
-    onOpenChange?.(newOpen);
+  const handleOpenChange = (nextOpen: boolean) => {
+    setIsOpen(nextOpen);
+    onOpenChange?.(nextOpen);
   };
 
   const handleInstall = async () => {
-    if (!isUpdateReady) {
-      return; // Don't allow install if update not ready
-    }
-    
     try {
       setIsInstalling(true);
       await quitAndInstall();
-    } catch (err) {
-      console.error("Failed to install update:", err);
+    } catch (installError) {
+      console.error("Failed to install update:", installError);
       setIsInstalling(false);
     }
   };
 
-  if (!updateInfo.hasUpdate || !isOpen) {
+  if (!updateInfo.hasUpdate) {
     return null;
   }
 
+  const statusLabel = isUpdateReady ? "Sẵn sàng cài" : isDownloading ? "Đang tải" : "Có bản mới";
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-4">
-          <div className="flex items-start gap-3">
-            {isDownloading ? (
-              <Download className="h-5 w-5 animate-bounce text-blue-500 mt-1 shrink-0" />
+    <Dialog open={isOpen} onOpenChange={handleOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <div className="flex items-center gap-2">
+            {isUpdateReady ? (
+              <CheckCircle2 className="h-5 w-5" />
+            ) : isDownloading ? (
+              <Download className="h-5 w-5" />
             ) : (
-              <AlertCircle className="h-5 w-5 text-yellow-500 mt-1 shrink-0" />
+              <ArrowUpCircle className="h-5 w-5" />
             )}
-            <div>
-              <CardTitle>Cập nhật khả dụng</CardTitle>
-              <CardDescription className="mt-1">
-                Phiên bản mới {updateInfo.newVersion} đã sẵn sàng
-              </CardDescription>
+            <Badge>{statusLabel}</Badge>
+          </div>
+          <DialogTitle>Có bản cập nhật mới</DialogTitle>
+          <DialogDescription>
+            {updateInfo.newVersion
+              ? `Phiên bản ${updateInfo.newVersion} có thể thay cho bản ${updateInfo.currentVersion}.`
+              : "Ứng dụng vừa tìm thấy một bản cập nhật mới."}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-lg border p-3">
+              <p className="text-sm text-muted-foreground">Phiên bản hiện tại</p>
+              <p className="mt-1 font-medium">{updateInfo.currentVersion}</p>
+            </div>
+
+            <div className="rounded-lg border p-3">
+              <p className="text-sm text-muted-foreground">Phiên bản mới</p>
+              <p className="mt-1 font-medium">{updateInfo.newVersion || "Đang xác nhận"}</p>
             </div>
           </div>
-          <button
-            onClick={() => handleOpenChange(false)}
-            className="text-muted-foreground hover:text-foreground"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </CardHeader>
 
-        <CardContent className="space-y-4">
-          {updateInfo.currentVersion && (
-            <div className="text-sm">
-              <p className="text-muted-foreground">
-                <span className="font-medium text-foreground">Phiên bản hiện tại:</span>{" "}
-                {updateInfo.currentVersion}
-              </p>
-            </div>
-          )}
+          <div className="rounded-lg border p-3">
+            <p className="text-sm text-muted-foreground">Ngày phát hành</p>
+            <p className="mt-1 font-medium">{formatReleaseDate(updateInfo.releaseDate)}</p>
+          </div>
 
-          {updateInfo.releaseNotes && (
-            <div className="rounded-lg border bg-muted/50 p-3">
-              <p className="mb-2 text-sm font-medium">Ghi chú phát hành:</p>
-              <div className="max-h-32 overflow-y-auto text-sm text-muted-foreground">
-                {typeof updateInfo.releaseNotes === "string" ? (
-                  <p className="whitespace-pre-wrap wrap-break-word">{updateInfo.releaseNotes}</p>
-                ) : (
-                  <pre className="whitespace-pre-wrap text-xs">
-                    {JSON.stringify(updateInfo.releaseNotes, null, 2)}
-                  </pre>
-                )}
-              </div>
-            </div>
-          )}
-
-          {isDownloading && downloadProgress && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Đang tải xuống...</span>
-                <span className="font-medium">
-                  {downloadProgress.percent}%
-                </span>
-              </div>
-              <Progress value={downloadProgress.percent} className="h-2" />
-              <p className="text-xs text-muted-foreground">
-                {(downloadProgress.transferred / 1024 / 1024).toFixed(2)} MB /{" "}
-                {(downloadProgress.total / 1024 / 1024).toFixed(2)} MB
-              </p>
-            </div>
+          {isDownloading && (
+            <Alert>
+              <Download className="h-4 w-4" />
+              <AlertTitle>Đang tải bản cập nhật</AlertTitle>
+              <AlertDescription>
+                Ứng dụng đang tải bản mới ở nền. Khi tải xong bạn có thể cài đặt ngay.
+              </AlertDescription>
+            </Alert>
           )}
 
           {error && (
-            <div className="rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-900 dark:bg-red-950">
-              <p className="text-sm text-red-700 dark:text-red-200">{error}</p>
-            </div>
+            <Alert variant="destructive">
+              <Info className="h-4 w-4" />
+              <AlertTitle>Có lỗi xảy ra</AlertTitle>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
           )}
 
-          <div className="flex gap-2 pt-2">
-            {!isDownloading && !isUpdateReady ? (
-              <>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => handleOpenChange(false)}
-                  className="flex-1"
-                >
-                  Để sau
-                </Button>
-                <Button
-                  type="button"
-                  disabled
-                  className="flex-1 gap-2"
-                  title="Đang tải xuống tự động..."
-                >
-                  <Download className="h-4 w-4" />
-                  Đợi tải xong...
-                </Button>
-              </>
-            ) : isDownloading ? (
-              <Button disabled className="w-full gap-2">
-                <Download className="h-4 w-4 animate-spin" />
-                Đang tải xuống...
-              </Button>
-            ) : isUpdateReady && !isInstalling ? (
-              <>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => handleOpenChange(false)}
-                  className="flex-1"
-                >
-                  Để sau
-                </Button>
-                <Button
-                  type="button"
-                  onClick={handleInstall}
-                  className="flex-1 gap-2"
-                >
-                  <Download className="h-4 w-4" />
-                  Cập nhật ngay
-                </Button>
-              </>
-            ) : (
-              <Button disabled className="w-full gap-2">
-                <Download className="h-4 w-4 animate-spin" />
-                Đang cài đặt...
-              </Button>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-    </div>
+          {updateInfo.releaseNotes && (
+            <>
+              <Separator />
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-muted-foreground" />
+                  <p className="text-sm font-medium">Thay đổi</p>
+                </div>
+                <p className="max-h-48 overflow-y-auto whitespace-pre-wrap text-sm text-muted-foreground">
+                  {updateInfo.releaseNotes}
+                </p>
+              </div>
+            </>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
+            Để sau
+          </Button>
+
+          {isUpdateReady ? (
+            <Button type="button" onClick={handleInstall} disabled={isInstalling}>
+              <CheckCircle2 className="mr-2 h-4 w-4" />
+              {isInstalling ? "Đang cài đặt..." : "Cài đặt"}
+            </Button>
+          ) : (
+            <Button type="button" disabled>
+              <Download className="mr-2 h-4 w-4" />
+              {isDownloading ? "Đang tải..." : "Đang chuẩn bị..."}
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -184,14 +174,14 @@ export function UpdateNotifier() {
   const [showDialog, setShowDialog] = React.useState(false);
 
   React.useEffect(() => {
-    // Only show dialog if:
-    // 1. Settings are loaded
-    // 2. Auto-notification is enabled
-    // 3. There's actually an update available
-    if (isLoaded && settings.autoNotifyOnStartup && updateInfo.hasUpdate) {
+    if (!isLoaded) {
+      return;
+    }
+
+    if (settings.autoNotifyOnStartup && updateInfo.hasUpdate) {
       setShowDialog(true);
     }
-  }, [updateInfo.hasUpdate, settings.autoNotifyOnStartup, isLoaded]);
+  }, [isLoaded, settings.autoNotifyOnStartup, updateInfo.hasUpdate]);
 
   if (!showDialog || !updateInfo.hasUpdate) {
     return null;

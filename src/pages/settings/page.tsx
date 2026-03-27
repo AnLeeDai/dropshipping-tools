@@ -1,189 +1,387 @@
 import * as React from "react";
-import ButtonBack from "@/components/ui/button-back";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  ArrowUpCircle,
+  BellRing,
+  CheckCircle2,
+  Download,
+  FileText,
+  Info,
+  LoaderCircle,
+  ShieldCheck,
+} from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import PageHeader from "@/components/page-header";
+import { getAppShellPageMeta } from "@/config/app-shell";
+import { siteConfig } from "@/config/site-config";
+import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import { CheckCircle2, AlertCircle } from "lucide-react";
-import { useUpdater } from "@/hooks/use-updater";
 import { useUpdateSettings } from "@/hooks/use-update-settings";
+import { useUpdater } from "@/hooks/use-updater";
+
+function formatDateTime(date: string | null | undefined) {
+  if (!date) {
+    return "Chưa kiểm tra";
+  }
+
+  const parsedDate = new Date(date);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return "Không xác định";
+  }
+
+  return parsedDate.toLocaleString("vi-VN", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatDate(date: string | null | undefined) {
+  if (!date) {
+    return "Không xác định";
+  }
+
+  const parsedDate = new Date(date);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return "Không xác định";
+  }
+
+  return parsedDate.toLocaleDateString("vi-VN", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+  });
+}
+
+function DetailRow({
+  label,
+  value,
+  isLast = false,
+}: {
+  label: string;
+  value: React.ReactNode;
+  isLast?: boolean;
+}) {
+  return (
+    <>
+      <div className="flex items-center justify-between gap-4 py-3">
+        <span className="text-sm text-muted-foreground">{label}</span>
+        <span className="text-right text-sm font-medium">{value}</span>
+      </div>
+      {!isLast && <Separator />}
+    </>
+  );
+}
+
+function SettingRow({
+  title,
+  description,
+  action,
+  isLast = false,
+}: {
+  title: string;
+  description: string;
+  action: React.ReactNode;
+  isLast?: boolean;
+}) {
+  return (
+    <>
+      <div className="flex items-center justify-between gap-4 py-4">
+        <div className="space-y-1">
+          <p className="text-sm font-medium">{title}</p>
+          <p className="text-sm text-muted-foreground">{description}</p>
+        </div>
+        {action}
+      </div>
+      {!isLast && <Separator />}
+    </>
+  );
+}
 
 export function SettingsPage() {
-  const { updateInfo, isChecking, error, checkForUpdates } = useUpdater();
+  const pageMeta = getAppShellPageMeta(siteConfig.routes.settings);
+  const PageIcon = pageMeta.icon;
+  const {
+    updateInfo,
+    isChecking,
+    isDownloading,
+    error,
+    isUpdateReady,
+    lastCheckedAt,
+    checkForUpdates,
+    quitAndInstall,
+  } = useUpdater();
   const { settings, toggleAutoNotify, setLastChecked } = useUpdateSettings();
-  const [checkStatus, setCheckStatus] = React.useState<"idle" | "checking" | "success" | "error">(
-    "idle"
-  );
+  const [checkStatus, setCheckStatus] = React.useState<"idle" | "success" | "error">("idle");
+  const [isInstalling, setIsInstalling] = React.useState(false);
 
   const handleCheckForUpdates = async () => {
     try {
-      setCheckStatus("checking");
-      await checkForUpdates();
+      const result = await checkForUpdates();
       setLastChecked();
-      setCheckStatus(error ? "error" : "success");
+      setCheckStatus(result.error ? "error" : "success");
     } catch {
       setCheckStatus("error");
     }
   };
 
-  const formatLastChecked = (date: string | null) => {
-    if (!date) return "Chưa kiểm tra";
-    const d = new Date(date);
-    return d.toLocaleString("vi-VN");
+  const handleInstallUpdate = async () => {
+    try {
+      setIsInstalling(true);
+      await quitAndInstall();
+    } catch (installError) {
+      console.error("Failed to install update:", installError);
+      setIsInstalling(false);
+    }
   };
 
+  const lastChecked = settings.lastCheckedAt || lastCheckedAt;
+  const statusLabel = error
+    ? "Lỗi"
+    : isUpdateReady
+      ? "Sẵn sàng"
+      : isDownloading
+        ? "Đang tải"
+        : updateInfo.hasUpdate
+          ? "Có bản mới"
+          : "Mới nhất";
+  const statusVariant = error
+    ? "destructive"
+    : updateInfo.hasUpdate || isDownloading || isUpdateReady
+      ? "default"
+      : "secondary";
+  const statusDescription = error
+    ? error
+    : isUpdateReady
+      ? "Bản cập nhật đã tải xong."
+      : isDownloading
+        ? "Ứng dụng đang tải bản cập nhật ở nền."
+        : updateInfo.hasUpdate
+          ? `Đã tìm thấy phiên bản ${updateInfo.newVersion}.`
+          : "Bạn đang dùng bản mới nhất.";
+
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <div className="sticky top-0 bg-background z-10 border-b shadow-sm">
-        <div className="container max-w-2xl mx-auto px-4 py-4 flex items-center gap-4">
-          <ButtonBack to="/" />
-          <div>
-            <h1 className="text-2xl font-bold">Cài đặt</h1>
-            <p className="text-sm text-muted-foreground">Quản lý và cập nhật ứng dụng</p>
-          </div>
-        </div>
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow="Ứng dụng"
+        title="Cài đặt"
+        description="Quản lý cập nhật và một số tùy chọn của ứng dụng."
+        icon={<PageIcon className="h-5 w-5" />}
+      />
 
-      {/* Content */}
-      <div className="container max-w-2xl mx-auto py-8 px-4">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="space-y-6">
+          <Card>
+            <CardHeader className="space-y-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="space-y-1">
+                  <CardTitle className="flex items-center gap-2">
+                    {error ? (
+                      <Info className="h-5 w-5 text-destructive" />
+                    ) : isUpdateReady ? (
+                      <CheckCircle2 className="h-5 w-5" />
+                    ) : isDownloading ? (
+                      <Download className="h-5 w-5" />
+                    ) : updateInfo.hasUpdate ? (
+                      <ArrowUpCircle className="h-5 w-5" />
+                    ) : (
+                      <ShieldCheck className="h-5 w-5" />
+                    )}
+                    Cập nhật
+                  </CardTitle>
+                  <CardDescription>{statusDescription}</CardDescription>
+                </div>
 
-        {/* Updates Section */}
-        <Card className="shadow-sm">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              {updateInfo.hasUpdate ? (
-                <div className="h-3 w-3 bg-blue-500 rounded-full animate-pulse" />
-              ) : (
-                <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-500" />
-              )}
-              Cập nhật ứng dụng
-            </CardTitle>
-            <CardDescription>
-              {updateInfo.hasUpdate
-                ? `Phiên bản ${updateInfo.newVersion} có sẵn`
-                : "Bạn đang sử dụng phiên bản mới nhất"}
-            </CardDescription>
-          </CardHeader>
-
-          <CardContent className="space-y-6">
-            {/* Current Version */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Phiên bản hiện tại</p>
-                <p className="text-lg font-semibold">{updateInfo.currentVersion || "1.0.0"}</p>
+                <Badge variant={statusVariant}>{statusLabel}</Badge>
               </div>
-              {updateInfo.newVersion && updateInfo.hasUpdate && (
-                <div>
-                  <p className="text-sm font-medium text-muted-foreground">Phiên bản mới</p>
-                  <p className="text-lg font-semibold text-blue-600 dark:text-blue-400">
-                    {updateInfo.newVersion}
+            </CardHeader>
+
+            <CardContent className="space-y-4">
+              {error && (
+                <Alert variant="destructive">
+                  <Info className="h-4 w-4" />
+                  <AlertTitle>Không thể kiểm tra bản mới</AlertTitle>
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
+
+              {!error && checkStatus === "success" && (
+                <Alert>
+                  <CheckCircle2 className="h-4 w-4" />
+                  <AlertTitle>Đã kiểm tra xong</AlertTitle>
+                  <AlertDescription>
+                    {updateInfo.hasUpdate
+                      ? `Đã tìm thấy phiên bản ${updateInfo.newVersion}.`
+                      : "Ứng dụng đang ở phiên bản mới nhất."}
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              <div className="flex flex-col gap-3 sm:flex-row">
+                {isUpdateReady ? (
+                  <Button onClick={handleInstallUpdate} disabled={isInstalling} className="sm:w-auto">
+                    {isInstalling ? (
+                      <>
+                        <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
+                        Đang cài đặt...
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="mr-2 h-4 w-4" />
+                        Cài đặt
+                      </>
+                    )}
+                  </Button>
+                ) : (
+                  <Button onClick={handleCheckForUpdates} disabled={isChecking} className="sm:w-auto">
+                    {isChecking ? (
+                      <>
+                        <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
+                        Đang kiểm tra...
+                      </>
+                    ) : (
+                      <>
+                        <ArrowUpCircle className="mr-2 h-4 w-4" />
+                        Kiểm tra bản mới
+                      </>
+                    )}
+                  </Button>
+                )}
+
+                <Button variant="outline" disabled className="sm:w-auto">
+                  <ShieldCheck className="mr-2 h-4 w-4" />
+                  {updateInfo.canAutoUpdate
+                    ? "Nhận cập nhật tự động"
+                    : "Chỉ có trên bản cài đặt"}
+                </Button>
+              </div>
+
+              <Separator />
+
+              <div className="space-y-1">
+                <DetailRow label="Phiên bản đang dùng" value={updateInfo.currentVersion} />
+                <DetailRow
+                  label="Phiên bản mới"
+                  value={updateInfo.hasUpdate ? updateInfo.newVersion || "Đang xác nhận" : "Chưa có"}
+                />
+                <DetailRow label="Ngày phát hành" value={formatDate(updateInfo.releaseDate)} />
+                <DetailRow label="Lần kiểm tra gần nhất" value={formatDateTime(lastChecked)} isLast />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <BellRing className="h-4 w-4 text-muted-foreground" />
+                <CardTitle>Thông báo</CardTitle>
+              </div>
+              <CardDescription>Tùy chọn liên quan đến bản cập nhật.</CardDescription>
+            </CardHeader>
+
+            <CardContent>
+              <SettingRow
+                title="Báo khi có bản mới"
+                description="Hiện hộp thoại khi ứng dụng tìm thấy bản cập nhật."
+                action={
+                  <Switch
+                    checked={settings.autoNotifyOnStartup}
+                    onCheckedChange={toggleAutoNotify}
+                  />
+                }
+                isLast
+              />
+            </CardContent>
+          </Card>
+
+          {updateInfo.releaseNotes && (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-muted-foreground" />
+                  <CardTitle>Nội dung bản mới</CardTitle>
+                </div>
+                <CardDescription>Các thay đổi trong bản cập nhật.</CardDescription>
+              </CardHeader>
+
+              <CardContent>
+                <div className="rounded-md border bg-muted/20 p-4">
+                  <p className="mb-2 text-sm font-medium">
+                    {updateInfo.releaseName || "Bản cập nhật mới"}
+                  </p>
+                  <p className="whitespace-pre-wrap text-sm text-muted-foreground">
+                    {updateInfo.releaseNotes}
                   </p>
                 </div>
-              )}
-            </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
 
-            {/* Last checked */}
-            <div className="bg-muted/50 rounded-lg p-4">
-              <p className="text-sm text-muted-foreground">
-                Lần kiểm tra cuối: <span className="font-medium">{formatLastChecked(null)}</span>
-              </p>
-            </div>
-
-            {/* Error message */}
-            {error && (
-              <div className="bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg p-4 flex gap-3">
-                <AlertCircle className="h-5 w-5 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-sm font-medium text-red-800 dark:text-red-200">Lỗi</p>
-                  <p className="text-sm text-red-700 dark:text-red-300">{error}</p>
-                </div>
+        <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="h-4 w-4 text-muted-foreground" />
+                <CardTitle>Trạng thái</CardTitle>
               </div>
-            )}
+              <CardDescription>Thông tin nhanh về bản cập nhật.</CardDescription>
+            </CardHeader>
 
-            {/* Success message */}
-            {checkStatus === "success" && !updateInfo.hasUpdate && (
-              <div className="bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-lg p-4 flex gap-3">
-                <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 shrink-0 mt-0.5" />
-                <p className="text-sm text-green-800 dark:text-green-200">
-                  Ứng dụng đã là phiên bản mới nhất
-                </p>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between rounded-lg border p-3">
+                <span className="text-sm text-muted-foreground">Trạng thái</span>
+                <Badge variant={statusVariant}>{statusLabel}</Badge>
               </div>
-            )}
 
-            {/* Auto-notify toggle */}
-            <div className="flex items-center justify-between p-4 bg-muted/30 rounded-lg border">
-              <div>
-                <p className="font-medium text-sm">Thông báo tự động</p>
-                <p className="text-xs text-muted-foreground">
-                  Hiển thị cảnh báo khi có phiên bản mới khi khởi động
-                </p>
-              </div>
-              <Switch checked={settings.autoNotifyOnStartup} onCheckedChange={toggleAutoNotify} />
-            </div>
-
-            {/* Check button */}
-            <Button
-              onClick={handleCheckForUpdates}
-              disabled={isChecking || checkStatus === "checking"}
-              className="w-full gap-2"
-              size="lg"
-            >
-              {isChecking || checkStatus === "checking" ? (
-                <>
-                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                  Đang kiểm tra...
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="h-4 w-4" />
-                  Kiểm tra cập nhật ngay
-                </>
-              )}
-            </Button>
-
-            {/* Update available action */}
-            {updateInfo.hasUpdate && (
-              <div className="bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg p-4 space-y-3">
-                <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
-                  Phiên bản mới {updateInfo.newVersion} đã sẵn sàng
-                </p>
-                {updateInfo.releaseNotes && (
-                  <div className="text-xs bg-background rounded p-2 max-h-48 overflow-y-auto">
-                    <p className="text-muted-foreground whitespace-pre-wrap wrap-break-word">
-                      {typeof updateInfo.releaseNotes === "string"
-                        ? updateInfo.releaseNotes
-                        : JSON.stringify(updateInfo.releaseNotes, null, 2)}
+              <div className="rounded-lg border p-3">
+                <div className="flex items-start gap-3">
+                  <BellRing className="mt-0.5 h-4 w-4 text-muted-foreground" />
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">Thông báo cập nhật</p>
+                    <p className="text-sm text-muted-foreground">
+                      {settings.autoNotifyOnStartup ? "Đang bật" : "Đang tắt"}
                     </p>
                   </div>
-                )}
-                <p className="text-xs text-blue-700 dark:text-blue-300">
-                  Cập nhật sẽ được tải xuống tự động. Bạn sẽ được thông báo khi sẵn sàng cài đặt.
-                </p>
+                </div>
               </div>
-            )}
-          </CardContent>
-        </Card>
 
-        {/* About Section */}
-        <Card className="shadow-sm mt-6">
-          <CardHeader>
-            <CardTitle>Về ứng dụng</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <p className="text-sm font-medium text-muted-foreground">Tên ứng dụng</p>
-              <p className="text-base font-semibold">Dropshipping Tools</p>
-            </div>
-            <div>
-              <p className="text-sm font-medium text-muted-foreground">Phiên bản</p>
-              <p className="text-base font-semibold">{updateInfo.currentVersion || "1.0.0"}</p>
-            </div>
-            <div>
-              <p className="text-sm font-medium text-muted-foreground">Tác giả</p>
-              <p className="text-base font-semibold">An Lee Dai</p>
-            </div>
-          </CardContent>
-        </Card>
+              <div className="rounded-lg border p-3">
+                <div className="flex items-start gap-3">
+                  <Download className="mt-0.5 h-4 w-4 text-muted-foreground" />
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">Cập nhật tự động</p>
+                    <p className="text-sm text-muted-foreground">
+                      {updateInfo.canAutoUpdate
+                        ? "Bản cài đặt có thể nhận bản mới tự động."
+                        : "Bạn đang ở môi trường dev hoặc bản build chưa phát hành."}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Info className="h-4 w-4 text-muted-foreground" />
+                <CardTitle>Giới thiệu</CardTitle>
+              </div>
+              <CardDescription>Thông tin cơ bản của ứng dụng.</CardDescription>
+            </CardHeader>
+
+            <CardContent className="space-y-1">
+              <DetailRow label="Tên ứng dụng" value="Dropshipping Tools" />
+              <DetailRow label="Tác giả" value="An Lee Dai" />
+              <DetailRow label="Nguồn cập nhật" value="GitHub Releases" isLast />
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   );

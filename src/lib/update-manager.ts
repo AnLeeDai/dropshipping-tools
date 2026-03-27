@@ -1,155 +1,342 @@
-import { ipcMain, BrowserWindow } from "electron";
-import { autoUpdater, UpdateInfo } from "electron-updater";
+import { app, autoUpdater, BrowserWindow, ipcMain } from "electron";
+import {
+  compareVersions,
+  currentRelease,
+  formatReleaseNotes,
+  normalizeVersion,
+  releaseConfig,
+} from "../config/release-config";
 
-interface UpdateState {
+interface GitHubReleaseResponse {
+  tag_name: string;
+  name: string;
+  body: string | null;
+  published_at: string | null;
+  created_at: string | null;
+}
+
+interface ReleaseMetadata {
+  version: string;
+  releaseName: string;
+  releaseNotes: string;
+  releaseDate: string | null;
+}
+
+export interface UpdateState {
   hasUpdate: boolean;
   currentVersion: string;
   newVersion?: string;
-  updateInfo?: UpdateInfo;
+  releaseName?: string;
+  releaseNotes?: string;
+  releaseDate?: string | null;
+  canAutoUpdate: boolean;
+  isDownloading: boolean;
+  isUpdateReady: boolean;
+  error: string | null;
+  lastCheckedAt: string | null;
 }
 
 let mainWindow: BrowserWindow | null = null;
-let downloadingUpdate = false;
+let scheduledCheck: NodeJS.Timeout | null = null;
+let autoUpdaterEventsRegistered = false;
+let latestReleaseMetadata: ReleaseMetadata | null = {
+  version: currentRelease.version,
+  releaseName: currentRelease.name,
+  releaseNotes: formatReleaseNotes(currentRelease.notes),
+  releaseDate: currentRelease.publishedAt,
+};
+
+let updateState: UpdateState = {
+  hasUpdate: false,
+  currentVersion: currentRelease.version,
+  releaseName: currentRelease.name,
+  releaseNotes: formatReleaseNotes(currentRelease.notes),
+  releaseDate: currentRelease.publishedAt,
+  canAutoUpdate: false,
+  isDownloading: false,
+  isUpdateReady: false,
+  error: null,
+  lastCheckedAt: null,
+};
+
+function canUseNativeAutoUpdate(): boolean {
+  return app.isPackaged && (process.platform === "win32" || process.platform === "darwin");
+}
+
+function buildFeedUrl(): string {
+  const { owner, name } = releaseConfig.repository;
+  return `https://update.electronjs.org/${owner}/${name}/${process.platform}-${process.arch}/${app.getVersion()}`;
+}
+
+function updateSnapshot(partialState: Partial<UpdateState>): UpdateState {
+  updateState = {
+    ...updateState,
+    currentVersion: app.getVersion(),
+    canAutoUpdate: canUseNativeAutoUpdate(),
+    ...partialState,
+  };
+
+  return updateState;
+}
+
+function sendSnapshot(channel: string): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+
+  mainWindow.webContents.send(channel, updateState);
+}
+
+function getCachedReleaseMetadata(): ReleaseMetadata {
+  return (
+    latestReleaseMetadata ?? {
+      version: currentRelease.version,
+      releaseName: currentRelease.name,
+      releaseNotes: formatReleaseNotes(currentRelease.notes),
+      releaseDate: currentRelease.publishedAt,
+    }
+  );
+}
+
+async function fetchLatestReleaseMetadata(): Promise<ReleaseMetadata> {
+  const { owner, name } = releaseConfig.repository;
+  const response = await fetch(`https://api.github.com/repos/${owner}/${name}/releases/latest`, {
+    headers: {
+      Accept: "application/vnd.github+json",
+      "User-Agent": app.getName(),
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`GitHub release lookup failed with status ${response.status}`);
+  }
+
+  const payload = (await response.json()) as GitHubReleaseResponse;
+  const releaseNotes =
+    payload.body && payload.body.trim().length > 0
+      ? payload.body.trim()
+      : formatReleaseNotes(currentRelease.notes);
+
+  latestReleaseMetadata = {
+    version: normalizeVersion(payload.tag_name || payload.name || currentRelease.version),
+    releaseName: payload.name?.trim() || `v${normalizeVersion(payload.tag_name)}`,
+    releaseNotes,
+    releaseDate: payload.published_at || payload.created_at || currentRelease.publishedAt,
+  };
+
+  return latestReleaseMetadata;
+}
+
+async function refreshUpdateState(options?: {
+  triggerBackgroundDownload?: boolean;
+  emitErrors?: boolean;
+}): Promise<UpdateState> {
+  const triggerBackgroundDownload = options?.triggerBackgroundDownload ?? false;
+  const emitErrors = options?.emitErrors ?? true;
+  const checkedAt = new Date().toISOString();
+
+  updateSnapshot({
+    currentVersion: app.getVersion(),
+    error: null,
+    lastCheckedAt: checkedAt,
+  });
+
+  try {
+    const releaseMetadata = await fetchLatestReleaseMetadata();
+    const hasUpdate = compareVersions(releaseMetadata.version, app.getVersion()) > 0;
+    const shouldStartNativeDownload =
+      hasUpdate && triggerBackgroundDownload && canUseNativeAutoUpdate();
+
+    updateSnapshot({
+      hasUpdate,
+      newVersion: hasUpdate ? releaseMetadata.version : undefined,
+      releaseName: releaseMetadata.releaseName,
+      releaseNotes: releaseMetadata.releaseNotes,
+      releaseDate: releaseMetadata.releaseDate,
+      isDownloading: shouldStartNativeDownload ? true : false,
+      isUpdateReady: hasUpdate ? updateState.isUpdateReady : false,
+      error: null,
+      lastCheckedAt: checkedAt,
+    });
+
+    if (hasUpdate && shouldStartNativeDownload) {
+      autoUpdater.checkForUpdates();
+    }
+
+    if (!hasUpdate) {
+      updateSnapshot({
+        isDownloading: false,
+        isUpdateReady: false,
+      });
+    }
+
+    return updateState;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown update error";
+
+    updateSnapshot({
+      error: message,
+      lastCheckedAt: checkedAt,
+      isDownloading: false,
+    });
+
+    if (emitErrors) {
+      sendSnapshot("update:error");
+    } else {
+      console.error("Silent update check failed:", message);
+      return updateState;
+    }
+
+    throw new Error(message);
+  }
+}
+
+function registerAutoUpdaterEvents(): void {
+  if (autoUpdaterEventsRegistered) {
+    return;
+  }
+
+  autoUpdaterEventsRegistered = true;
+
+  autoUpdater.on("update-available", () => {
+    const metadata = getCachedReleaseMetadata();
+
+    updateSnapshot({
+      hasUpdate: true,
+      newVersion: metadata.version,
+      releaseName: metadata.releaseName,
+      releaseNotes: metadata.releaseNotes,
+      releaseDate: metadata.releaseDate,
+      isDownloading: true,
+      isUpdateReady: false,
+      error: null,
+    });
+
+    sendSnapshot("update:available");
+  });
+
+  autoUpdater.on("update-not-available", () => {
+    updateSnapshot({
+      hasUpdate: false,
+      newVersion: undefined,
+      isDownloading: false,
+      isUpdateReady: false,
+      error: null,
+    });
+
+    sendSnapshot("update:not-available");
+  });
+
+  autoUpdater.on("update-downloaded", (...args: unknown[]) => {
+    const metadata = getCachedReleaseMetadata();
+    const [, releaseNotes, releaseName, releaseDate] = args as [
+      unknown,
+      string | undefined,
+      string | undefined,
+      string | undefined,
+    ];
+
+    updateSnapshot({
+      hasUpdate: true,
+      newVersion: metadata.version,
+      releaseName: releaseName?.trim() || metadata.releaseName,
+      releaseNotes: releaseNotes?.trim() || metadata.releaseNotes,
+      releaseDate: releaseDate || metadata.releaseDate,
+      isDownloading: false,
+      isUpdateReady: true,
+      error: null,
+    });
+
+    sendSnapshot("update:downloaded");
+  });
+
+  autoUpdater.on("error", (error) => {
+    const message = error instanceof Error ? error.message : "Unknown update error";
+
+    updateSnapshot({
+      error: message,
+      isDownloading: false,
+    });
+
+    sendSnapshot("update:error");
+  });
+}
 
 export function initializeUpdater(window: BrowserWindow): void {
   mainWindow = window;
 
-  // Configure auto-updater to use GitHub releases
+  updateSnapshot({
+    currentVersion: app.getVersion(),
+    releaseName: currentRelease.name,
+    releaseNotes: formatReleaseNotes(currentRelease.notes),
+    releaseDate: currentRelease.publishedAt,
+  });
+
+  if (!canUseNativeAutoUpdate()) {
+    console.log("Native auto-update is disabled in development or on an unsupported platform.");
+    return;
+  }
+
   autoUpdater.setFeedURL({
-    provider: "github",
-    owner: "AnLeeDai",
-    repo: "dropshipping-tools",
+    url: buildFeedUrl(),
   });
 
-  // Enable automatic downloads
-  autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
+  registerAutoUpdaterEvents();
 
-  console.log("Updater initialized with GitHub feedURL");
-  console.log("AutoDownload:", autoUpdater.autoDownload);
-  console.log("AutoInstallOnAppQuit:", autoUpdater.autoInstallOnAppQuit);
-
-  // Initial check for updates
-  autoUpdater.checkForUpdates().catch(err => {
-    console.error("Initial update check failed:", err);
-  });
-
-  // Check for updates every hour
-  setInterval(() => {
-    autoUpdater.checkForUpdates().catch(err => {
-      console.error("Periodic update check failed:", err);
+  const initialDelay = process.argv.includes("--squirrel-firstrun") ? 15000 : 5000;
+  setTimeout(() => {
+    void refreshUpdateState({
+      triggerBackgroundDownload: true,
+      emitErrors: false,
     });
-  }, 60 * 60 * 1000);
+  }, initialDelay);
 
-  // Events
-  autoUpdater.on("update-available", (info: UpdateInfo) => {
-    console.log("Update available:", info.version);
-    console.log("Auto-download enabled, download will start automatically...");
-    downloadingUpdate = true;
-    if (mainWindow) {
-      mainWindow.webContents.send("update:available", {
-        hasUpdate: true,
-        currentVersion: autoUpdater.currentVersion.version,
-        newVersion: info.version,
-        releaseNotes: info.releaseNotes,
+  const intervalMs = releaseConfig.autoUpdate.checkIntervalMinutes * 60 * 1000;
+  if (!scheduledCheck) {
+    scheduledCheck = setInterval(() => {
+      void refreshUpdateState({
+        triggerBackgroundDownload: true,
+        emitErrors: false,
       });
-    }
-  });
-
-  autoUpdater.on("update-downloaded", () => {
-    console.log("Update downloaded successfully and ready to install");
-    downloadingUpdate = false;
-    if (mainWindow) {
-      mainWindow.webContents.send("update:downloaded");
-    }
-  });
-
-  autoUpdater.on("update-not-available", () => {
-    console.log("No update available");
-    downloadingUpdate = false;
-    if (mainWindow) {
-      mainWindow.webContents.send("update:not-available");
-    }
-  });
-
-  autoUpdater.on("error", (err: Error) => {
-    downloadingUpdate = false;
-    console.error("Update error:", err.message || err);
-    if (mainWindow) {
-      mainWindow.webContents.send("update:error", err.message || "Unknown error");
-    }
-  });
-
-  autoUpdater.on("download-progress", (progress) => {
-    console.log(`Update download progress: ${progress.percent.toFixed(2)}% (${(progress.transferred / 1024 / 1024).toFixed(2)}MB/${(progress.total / 1024 / 1024).toFixed(2)}MB)`);
-    if (mainWindow) {
-      mainWindow.webContents.send("update:progress", {
-        percent: Math.round(progress.percent),
-        bytesPerSecond: progress.bytesPerSecond,
-        total: progress.total,
-        transferred: progress.transferred,
-      });
-    }
-  });
+    }, intervalMs);
+  }
 }
 
 export function setupUpdateHandlers(): void {
-  // Check for updates
   ipcMain.handle("updater:check-for-updates", async () => {
-    try {
-      console.log("Checking for updates...");
-      const result = await autoUpdater.checkForUpdates();
-      const hasUpdate = !!result?.updateInfo;
-      console.log("Update check result:", {
-        hasUpdate,
-        currentVersion: autoUpdater.currentVersion.version,
-        newVersion: result?.updateInfo?.version,
-      });
-      return {
-        hasUpdate,
-        currentVersion: autoUpdater.currentVersion.version,
-        newVersion: result?.updateInfo?.version,
-      };
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      console.error("Failed to check for updates:", errorMsg);
-      throw new Error(`Update check failed: ${errorMsg}`);
-    }
+    return refreshUpdateState({
+      triggerBackgroundDownload: true,
+      emitErrors: true,
+    });
   });
 
-  // Quit and install
-  ipcMain.handle("updater:quit-and-install", () => {
-    try {
-      console.log("Attempting to quit and install update...");
-      console.log("Downloading update:", downloadingUpdate);
-      
-      if (downloadingUpdate) {
-        throw new Error("Update is still downloading. Please wait for download to complete.");
-      }
-      
-      // Use setImmediate to ensure all pending IPC messages are processed
-      setImmediate(() => {
-        console.log("Calling autoUpdater.quitAndInstall()");
-        autoUpdater.quitAndInstall();
-      });
-      
-      return { success: true };
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      console.error("Failed to quit and install:", errorMsg);
-      throw new Error(`Installation failed: ${errorMsg}`);
+  ipcMain.handle("updater:quit-and-install", async () => {
+    if (!canUseNativeAutoUpdate()) {
+      throw new Error("Auto update is only available in packaged builds.");
     }
+
+    if (!updateState.isUpdateReady) {
+      throw new Error("Update is not ready to install yet.");
+    }
+
+    setImmediate(() => {
+      autoUpdater.quitAndInstall();
+    });
+
+    return { success: true };
   });
 
-  // Get current version
-  ipcMain.handle("updater:get-version", () => {
-    return autoUpdater.currentVersion.version;
-  });
+  ipcMain.handle("updater:get-version", () => app.getVersion());
+  ipcMain.handle("updater:get-state", () => getUpdaterState());
 }
 
 export function getUpdaterState(): UpdateState {
-  return {
-    hasUpdate: false,
-    currentVersion: autoUpdater.currentVersion.version,
-  };
+  return updateSnapshot({});
+}
+
+export function disposeUpdater(): void {
+  if (scheduledCheck) {
+    clearInterval(scheduledCheck);
+    scheduledCheck = null;
+  }
 }

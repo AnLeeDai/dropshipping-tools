@@ -1,15 +1,21 @@
 {
   "name": "dropshipping-tools",
   "productName": "dropshipping-tools",
-  "version": "1.0.0",
-  "description": "My Electron application description",
+  "version": "0.0.2",
+  "description": "Desktop tools for dropshipping workflows",
   "main": ".vite/build/main.js",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AnLeeDai/dropshipping-tools.git"
+  },
+  "homepage": "https://github.com/AnLeeDai/dropshipping-tools",
   "scripts": {
     "start": "electron-forge start",
     "package": "electron-forge package",
     "make": "electron-forge make",
     "publish": "electron-forge publish",
+    "release:prepare": "node scripts/prepare-release.cjs",
     "lint": "eslint --ext .ts,.tsx ."
   },
   "keywords": [],

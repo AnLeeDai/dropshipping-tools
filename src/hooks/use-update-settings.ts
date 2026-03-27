@@ -41,9 +41,10 @@ export function useUpdateSettings() {
     }
   };
 
-  const toggleAutoNotify = () => {
+  const toggleAutoNotify = (nextValue?: boolean) => {
     updateSettings({
-      autoNotifyOnStartup: !settings.autoNotifyOnStartup,
+      autoNotifyOnStartup:
+        typeof nextValue === "boolean" ? nextValue : !settings.autoNotifyOnStartup,
     });
   };
 

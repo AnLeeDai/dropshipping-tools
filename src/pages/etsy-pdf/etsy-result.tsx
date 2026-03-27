@@ -1,6 +1,14 @@
-import { Copy } from "lucide-react";
+import { Copy, Database } from "lucide-react";
 import { toast } from "sonner";
-
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -9,14 +17,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-} from "@/components/ui/card";
 import {
   Tooltip,
   TooltipContent,
@@ -63,9 +63,7 @@ function WrapCell({ value, className }: { value: string; className?: string }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <div
-          className={`whitespace-normal break-words leading-5 ${className ?? ""}`}
-        >
+        <div className={`whitespace-normal break-words leading-5 ${className ?? ""}`}>
           {value || "-"}
         </div>
       </TooltipTrigger>
@@ -81,42 +79,46 @@ export default function EtsyResult({ data }: EtsyResultProps) {
     try {
       const content = convertRowsToTabSeparated(data);
       await copyToClipboard(content);
-      toast.success(`Đã copy ${data.length} dòng`);
+      toast.success(`Đã sao chép ${data.length} dòng.`);
     } catch {
-      toast.error("Copy thất bại");
+      toast.error("Sao chép thất bại.");
     }
   };
 
   return (
     <TooltipProvider delayDuration={150}>
-      <Card className="w-full max-w-full overflow-hidden">
-        <CardHeader className="flex flex-row items-center justify-between gap-4 space-y-0">
-          <div className="min-w-0">
-            <CardTitle>Kết quả parse Etsy</CardTitle>
-            <CardDescription>{data.length} dòng dữ liệu</CardDescription>
+      <Card className="overflow-hidden">
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 space-y-1">
+            <div className="flex items-center gap-2">
+              <Database className="h-4 w-4 text-muted-foreground" />
+              <CardTitle>Dữ liệu đã tách</CardTitle>
+              <Badge variant="outline">{data.length} dòng</Badge>
+            </div>
+            <CardDescription>
+              Kiểm tra lại trước khi dán sang spreadsheet hoặc công cụ khác.
+            </CardDescription>
           </div>
 
-          <Button size="sm" onClick={copyAll} className="shrink-0">
+          <Button size="sm" onClick={copyAll}>
             <Copy className="mr-2 h-4 w-4" />
-            Copy
+            Sao chép
           </Button>
         </CardHeader>
 
-        <CardContent className="max-w-full overflow-hidden">
-          <div className="w-full overflow-x-auto rounded-md border">
+        <CardContent>
+          <div className="overflow-x-auto rounded-md border">
             <Table className="w-full table-auto">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[110px]">Order ID</TableHead>
-                  <TableHead className="min-w-[180px]">Ship to</TableHead>
-                  <TableHead className="min-w-[220px]">Title</TableHead>
+                  <TableHead className="w-[110px]">Mã đơn</TableHead>
+                  <TableHead className="min-w-[180px]">Người nhận</TableHead>
+                  <TableHead className="min-w-[220px]">Sản phẩm</TableHead>
                   <TableHead className="w-[140px]">SKU</TableHead>
-                  <TableHead className="min-w-[220px]">Variation</TableHead>
-                  <TableHead className="min-w-[240px]">
-                    Personalization
-                  </TableHead>
-                  <TableHead className="w-[70px] text-right">Qty</TableHead>
-                  <TableHead className="w-[90px] text-right">Price</TableHead>
+                  <TableHead className="min-w-[220px]">Phân loại</TableHead>
+                  <TableHead className="min-w-[240px]">Cá nhân hóa</TableHead>
+                  <TableHead className="w-[70px] text-right">SL</TableHead>
+                  <TableHead className="w-[90px] text-right">Giá</TableHead>
                 </TableRow>
               </TableHeader>
 
@@ -124,47 +126,33 @@ export default function EtsyResult({ data }: EtsyResultProps) {
                 {data.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={8} className="text-center">
-                      Không có dữ liệu
+                      Không có dữ liệu.
                     </TableCell>
                   </TableRow>
                 ) : (
-                  data.map((r, i) => (
-                    <TableRow
-                      key={`${r.orderId}-${i}`}
-                      className={`align-top transition-colors ${
-                        i % 2 === 0 ? "bg-muted/30" : ""
-                      } hover:bg-muted`}
-                    >
+                  data.map((row, index) => (
+                    <TableRow key={`${row.orderId}-${index}`} className="align-top">
                       <TableCell className="max-w-[110px]">
-                        <TruncateCell value={r.orderId} />
+                        <TruncateCell value={row.orderId} />
                       </TableCell>
-
                       <TableCell className="max-w-[220px]">
-                        <WrapCell value={r.shipTo} />
+                        <WrapCell value={row.shipTo} />
                       </TableCell>
-
                       <TableCell className="max-w-[260px]">
-                        <WrapCell value={r.title} />
+                        <WrapCell value={row.title} />
                       </TableCell>
-
                       <TableCell className="max-w-[140px]">
-                        <TruncateCell value={r.sku} />
+                        <TruncateCell value={row.sku} />
                       </TableCell>
-
                       <TableCell className="max-w-[260px]">
-                        <WrapCell value={r.variation} />
+                        <WrapCell value={row.variation} />
                       </TableCell>
-
                       <TableCell className="max-w-[300px]">
-                        <WrapCell value={r.personalization} />
+                        <WrapCell value={row.personalization} />
                       </TableCell>
-
+                      <TableCell className="text-right align-middle">{row.quantity}</TableCell>
                       <TableCell className="text-right align-middle">
-                        {r.quantity}
-                      </TableCell>
-
-                      <TableCell className="text-right align-middle">
-                        {r.unitPrice.toFixed(2)}
+                        {row.unitPrice.toFixed(2)}
                       </TableCell>
                     </TableRow>
                   ))

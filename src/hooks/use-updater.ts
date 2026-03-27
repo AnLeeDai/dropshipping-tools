@@ -1,128 +1,130 @@
 import * as React from "react";
+import { currentRelease } from "@/config/release-config";
 
 interface UpdateInfo {
   hasUpdate: boolean;
-  currentVersion?: string;
+  currentVersion: string;
   newVersion?: string;
+  releaseName?: string;
   releaseNotes?: string;
+  releaseDate?: string | null;
+  canAutoUpdate: boolean;
 }
 
-interface DownloadProgress {
-  percent: number;
-  bytesPerSecond: number;
-  total: number;
-  transferred: number;
+interface UpdaterSnapshot extends UpdateInfo {
+  isDownloading: boolean;
+  isUpdateReady: boolean;
+  error: string | null;
+  lastCheckedAt: string | null;
+}
+
+interface UpdaterContextValue {
+  updateInfo: UpdateInfo;
+  isDownloading: boolean;
+  isChecking: boolean;
+  error: string | null;
+  isUpdateReady: boolean;
+  lastCheckedAt: string | null;
+  checkForUpdates: () => Promise<UpdaterSnapshot>;
+  quitAndInstall: () => Promise<void>;
 }
 
 declare global {
   interface Window {
     electron?: {
       updater: {
-        checkForUpdates: () => Promise<UpdateInfo>;
+        checkForUpdates: () => Promise<UpdaterSnapshot>;
         quitAndInstall: () => Promise<void>;
         getVersion: () => Promise<string>;
-        onUpdateAvailable: (callback: (data: UpdateInfo) => void) => void;
-        onUpdateDownloaded: (callback: () => void) => void;
-        onUpdateNotAvailable: (callback: () => void) => void;
-        onUpdateError: (callback: (message: string) => void) => void;
-        onDownloadProgress: (callback: (progress: DownloadProgress) => void) => void;
+        getState: () => Promise<UpdaterSnapshot>;
+        onUpdateAvailable: (callback: (data: UpdaterSnapshot) => void) => () => void;
+        onUpdateDownloaded: (callback: (data: UpdaterSnapshot) => void) => () => void;
+        onUpdateNotAvailable: (callback: (data: UpdaterSnapshot) => void) => () => void;
+        onUpdateError: (callback: (data: UpdaterSnapshot) => void) => () => void;
       };
     };
   }
 }
 
-export function useUpdater() {
-  const [updateInfo, setUpdateInfo] = React.useState<UpdateInfo>({
-    hasUpdate: false,
-  });
-  const [isDownloading, setIsDownloading] = React.useState(false);
-  const [downloadProgress, setDownloadProgress] =
-    React.useState<DownloadProgress | null>(null);
+const initialSnapshot: UpdaterSnapshot = {
+  hasUpdate: false,
+  currentVersion: currentRelease.version,
+  releaseName: currentRelease.name,
+  releaseNotes: currentRelease.notes.join("\n"),
+  releaseDate: currentRelease.publishedAt,
+  canAutoUpdate: false,
+  isDownloading: false,
+  isUpdateReady: false,
+  error: null,
+  lastCheckedAt: null,
+};
+
+const UpdaterContext = React.createContext<UpdaterContextValue | null>(null);
+
+export function UpdaterProvider({ children }: { children: React.ReactNode }) {
+  const [snapshot, setSnapshot] = React.useState<UpdaterSnapshot>(initialSnapshot);
   const [isChecking, setIsChecking] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
-  const [isUpdateReady, setIsUpdateReady] = React.useState(false);
 
-  // Check for updates on mount
-  React.useEffect(() => {
-    const checkUpdates = async () => {
-      if (!window.electron?.updater) {
-        return;
-      }
-
-      try {
-        setIsChecking(true);
-        const info = await window.electron.updater.checkForUpdates();
-        setUpdateInfo(info);
-        console.log("Initial update check:", info);
-      } catch (err) {
-        console.error("Failed to check for updates:", err);
-        setError(err instanceof Error ? err.message : "Unknown error");
-      } finally {
-        setIsChecking(false);
-      }
-    };
-
-    checkUpdates();
-  }, []);
-
-  // Listen for update events
   React.useEffect(() => {
     if (!window.electron?.updater) {
       return;
     }
 
-    window.electron.updater.onUpdateAvailable((data) => {
-      console.log("Update available event received:", data);
-      setUpdateInfo(data);
-      setIsDownloading(true);
-      setDownloadProgress(null);
-      setIsUpdateReady(false);
-      setError(null);
+    let isMounted = true;
+
+    const syncInitialState = async () => {
+      try {
+        const nextSnapshot = await window.electron!.updater.getState();
+        if (isMounted) {
+          setSnapshot(nextSnapshot);
+        }
+      } catch (error) {
+        if (!isMounted) {
+          return;
+        }
+
+        const message = error instanceof Error ? error.message : "Unknown update error";
+        setSnapshot((current) => ({
+          ...current,
+          error: message,
+        }));
+      }
+    };
+
+    void syncInitialState();
+
+    const unsubscribeAvailable = window.electron.updater.onUpdateAvailable((nextSnapshot) => {
+      setSnapshot(nextSnapshot);
+    });
+    const unsubscribeDownloaded = window.electron.updater.onUpdateDownloaded((nextSnapshot) => {
+      setSnapshot(nextSnapshot);
+    });
+    const unsubscribeNotAvailable = window.electron.updater.onUpdateNotAvailable((nextSnapshot) => {
+      setSnapshot(nextSnapshot);
+    });
+    const unsubscribeError = window.electron.updater.onUpdateError((nextSnapshot) => {
+      setSnapshot(nextSnapshot);
     });
 
-    window.electron.updater.onUpdateDownloaded(() => {
-      console.log("Update downloaded event received");
-      setIsDownloading(false);
-      setDownloadProgress({ percent: 100, bytesPerSecond: 0, total: 0, transferred: 0 });
-      setIsUpdateReady(true);
-    });
-
-    window.electron.updater.onUpdateNotAvailable(() => {
-      console.log("Update not available event received");
-      setUpdateInfo({ hasUpdate: false });
-      setIsDownloading(false);
-      setIsUpdateReady(false);
-    });
-
-    window.electron.updater.onUpdateError((message) => {
-      console.error("Update error event received:", message);
-      setError(message);
-      setIsDownloading(false);
-    });
-
-    window.electron.updater.onDownloadProgress((progress) => {
-      console.log(`Download progress: ${progress.percent}%`);
-      setIsDownloading(true);
-      setDownloadProgress(progress);
-    });
+    return () => {
+      isMounted = false;
+      unsubscribeAvailable();
+      unsubscribeDownloaded();
+      unsubscribeNotAvailable();
+      unsubscribeError();
+    };
   }, []);
 
   const checkForUpdates = async () => {
     if (!window.electron?.updater) {
-      setError("Electron updater not available");
-      return;
+      throw new Error("Updater service is not available.");
     }
 
     try {
       setIsChecking(true);
-      setError(null);
-      const info = await window.electron.updater.checkForUpdates();
-      setUpdateInfo(info);
-      console.log("Manual update check:", info);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown error";
-      setError(message);
-      console.error("Manual update check failed:", message);
+      const nextSnapshot = await window.electron.updater.checkForUpdates();
+      setSnapshot(nextSnapshot);
+      return nextSnapshot;
     } finally {
       setIsChecking(false);
     }
@@ -130,33 +132,40 @@ export function useUpdater() {
 
   const quitAndInstall = async () => {
     if (!window.electron?.updater) {
-      setError("Electron updater not available");
-      return;
+      throw new Error("Updater service is not available.");
     }
 
-    if (!isUpdateReady) {
-      setError("Update is not ready to install. Please wait for download to complete.");
-      return;
-    }
-
-    try {
-      console.log("Calling quitAndInstall...");
-      await window.electron.updater.quitAndInstall();
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown error";
-      setError(message);
-      console.error("Quit and install failed:", message);
-    }
+    await window.electron.updater.quitAndInstall();
   };
 
-  return {
-    updateInfo,
-    isDownloading,
-    downloadProgress,
+  const value: UpdaterContextValue = {
+    updateInfo: {
+      hasUpdate: snapshot.hasUpdate,
+      currentVersion: snapshot.currentVersion,
+      newVersion: snapshot.newVersion,
+      releaseName: snapshot.releaseName,
+      releaseNotes: snapshot.releaseNotes,
+      releaseDate: snapshot.releaseDate,
+      canAutoUpdate: snapshot.canAutoUpdate,
+    },
+    isDownloading: snapshot.isDownloading,
     isChecking,
-    error,
-    isUpdateReady,
+    error: snapshot.error,
+    isUpdateReady: snapshot.isUpdateReady,
+    lastCheckedAt: snapshot.lastCheckedAt,
     checkForUpdates,
     quitAndInstall,
   };
+
+  return React.createElement(UpdaterContext.Provider, { value }, children);
+}
+
+export function useUpdater() {
+  const context = React.useContext(UpdaterContext);
+
+  if (!context) {
+    throw new Error("useUpdater must be used inside UpdaterProvider.");
+  }
+
+  return context;
 }

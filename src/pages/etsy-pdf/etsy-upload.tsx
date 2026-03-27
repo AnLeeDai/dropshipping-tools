@@ -1,13 +1,24 @@
 import * as React from "react";
-import { Upload, FileText, X, Copy } from "lucide-react";
+import {
+  CheckCircle2,
+  Copy,
+  Database,
+  FileText,
+  List,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
+  CardDescription,
   CardHeader,
   CardTitle,
-  CardDescription,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,18 +26,20 @@ import { Progress } from "@/components/ui/progress";
 import { useFileUpload } from "@/hooks/use-file-upload";
 import { useStatusMessage } from "@/hooks/use-status-message";
 import {
-  validatePdfFile,
   convertRowsToTabSeparated,
   copyToClipboard,
+  validatePdfFile,
 } from "@/lib/file-utils";
 import EtsyConvert from "./etsy-convert";
 import EtsyResult, { type ParsedEtsyRow } from "./etsy-result";
 
+function formatFileSize(fileSize: number) {
+  return `${(fileSize / 1024 / 1024).toFixed(2)} MB`;
+}
+
 export default function EtsyUpload() {
   const [isDragging, setIsDragging] = React.useState(false);
-  const [parsedDataList, setParsedDataList] = React.useState<ParsedEtsyRow[][]>(
-    [],
-  );
+  const [parsedDataList, setParsedDataList] = React.useState<ParsedEtsyRow[][]>([]);
 
   const inputRef = React.useRef<HTMLInputElement | null>(null);
   const {
@@ -38,7 +51,11 @@ export default function EtsyUpload() {
     startProgressSimulation,
     clearAll: clearAllFiles,
   } = useFileUpload();
-  const { reset, setError, setSuccess } = useStatusMessage();
+  const { errorMessage, successMessage, reset, setError, setSuccess } = useStatusMessage();
+
+  const totalRows = parsedDataList.reduce((total, rows) => total + rows.length, 0);
+  const completedFiles = files.filter((file) => file.isComplete).length;
+  const processingFiles = files.filter((file) => file.isUploading || file.isProcessing).length;
 
   const handleSetFiles = React.useCallback(
     (selectedFiles: File[] | null): void => {
@@ -48,10 +65,10 @@ export default function EtsyUpload() {
         return;
       }
 
-      const validFiles = selectedFiles.filter((f) => validatePdfFile(f));
+      const validFiles = selectedFiles.filter((file) => validatePdfFile(file));
 
       if (validFiles.length === 0) {
-        setError("Vui lòng chọn một hoặc nhiều tệp PDF hợp lệ.");
+        setError("Vui lòng chọn một hoặc nhiều file PDF hợp lệ.");
         if (inputRef.current) {
           inputRef.current.value = "";
         }
@@ -59,9 +76,7 @@ export default function EtsyUpload() {
       }
 
       if (validFiles.length < selectedFiles.length) {
-        setError(
-          `${selectedFiles.length - validFiles.length} tệp không hợp lệ (chỉ PDF được hỗ trợ).`,
-        );
+        setError(`${selectedFiles.length - validFiles.length} file không hợp lệ đã bị bỏ qua.`);
       }
 
       const newFileItems = validFiles.map((file) => ({
@@ -75,21 +90,19 @@ export default function EtsyUpload() {
       const { duplicates } = addFiles(newFileItems);
 
       if (duplicates > 0) {
-        toast.warning("Một số tệp đã tồn tại trong danh sách.");
+        toast.warning("Một số file đã có trong danh sách.");
       }
 
       if (inputRef.current) {
         inputRef.current.value = "";
       }
     },
-    [reset, setError, addFiles],
+    [addFiles, reset, setError],
   );
 
   const handleChangeFile = React.useCallback(
     (event: React.ChangeEvent<HTMLInputElement>): void => {
-      const selectedFiles = event.target.files
-        ? Array.from(event.target.files)
-        : null;
+      const selectedFiles = event.target.files ? Array.from(event.target.files) : null;
       handleSetFiles(selectedFiles);
     },
     [handleSetFiles],
@@ -107,13 +120,10 @@ export default function EtsyUpload() {
     inputRef.current?.click();
   }, []);
 
-  const handleDragOver = React.useCallback(
-    (event: React.DragEvent<HTMLDivElement>): void => {
-      event.preventDefault();
-      setIsDragging(true);
-    },
-    [],
-  );
+  const handleDragOver = React.useCallback((event: React.DragEvent<HTMLDivElement>): void => {
+    event.preventDefault();
+    setIsDragging(true);
+  }, []);
 
   const handleDragLeave = React.useCallback((): void => {
     setIsDragging(false);
@@ -124,9 +134,7 @@ export default function EtsyUpload() {
       event.preventDefault();
       setIsDragging(false);
 
-      const droppedFiles = event.dataTransfer.files
-        ? Array.from(event.dataTransfer.files)
-        : null;
+      const droppedFiles = event.dataTransfer.files ? Array.from(event.dataTransfer.files) : null;
       handleSetFiles(droppedFiles);
     },
     [handleSetFiles],
@@ -137,7 +145,7 @@ export default function EtsyUpload() {
       event.preventDefault();
 
       if (files.length === 0) {
-        setError("Vui lòng chọn một hoặc nhiều tệp PDF trước khi tải lên.");
+        setError("Vui lòng chọn ít nhất một file PDF trước khi xử lý.");
         return;
       }
 
@@ -146,7 +154,6 @@ export default function EtsyUpload() {
 
       let completedCount = 0;
 
-      // Process all files in parallel
       files.forEach((fileItem) => {
         const fileKey = getFileKey(fileItem.file);
 
@@ -155,25 +162,18 @@ export default function EtsyUpload() {
           progress: 0,
           isProcessing: false,
           isComplete: false,
+          error: undefined,
         });
 
         startProgressSimulation(fileKey, () => {
           completedCount += 1;
           if (completedCount === files.length) {
-            setSuccess(`Đã xử lý ${files.length} tệp thành công.`);
+            setSuccess(`Đã xử lý ${files.length} file.`);
           }
         });
       });
     },
-    [
-      files,
-      reset,
-      setError,
-      setSuccess,
-      getFileKey,
-      updateFileItem,
-      startProgressSimulation,
-    ],
+    [files, getFileKey, reset, setError, setSuccess, startProgressSimulation, updateFileItem],
   );
 
   const handleParsed = React.useCallback((data: ParsedEtsyRow[]): void => {
@@ -190,213 +190,267 @@ export default function EtsyUpload() {
 
   const handleCopyAllContent = React.useCallback((): void => {
     if (parsedDataList.length === 0) {
-      toast.error("Không có dữ liệu để sao chép");
+      toast.error("Chưa có dữ liệu để sao chép.");
       return;
     }
 
-    const lines: string[] = [];
-    parsedDataList.forEach((rows) => {
-      lines.push(convertRowsToTabSeparated(rows));
-    });
-
-    const fullContent = lines.join("\n");
+    const fullContent = parsedDataList
+      .map((rows) => convertRowsToTabSeparated(rows))
+      .join("\n");
 
     copyToClipboard(fullContent)
       .then(() => {
-        toast.success(
-          `Đã sao chép toàn bộ nội dung từ ${parsedDataList.length} file`,
-        );
+        toast.success(`Đã sao chép dữ liệu từ ${parsedDataList.length} file.`);
       })
       .catch(() => {
-        toast.error("Không thể sao chép dữ liệu");
+        toast.error("Không thể sao chép dữ liệu.");
       });
   }, [parsedDataList]);
 
   return (
-    <div className="w-full space-y-6">
-      <form onSubmit={handleSubmit} className="w-full">
-        <Card className="w-full">
+    <div className="space-y-6">
+      <div className="grid gap-4 md:grid-cols-3">
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center gap-2">
+              <FileText className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-base">File đã thêm</CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <p className="text-3xl font-semibold">{files.length}</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Số file đang có trong hàng đợi.
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-base">Đã xong</CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <p className="text-3xl font-semibold">{completedFiles}</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              File đã đọc xong và có dữ liệu.
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center gap-2">
+              <Database className="h-4 w-4 text-muted-foreground" />
+              <CardTitle className="text-base">Dòng dữ liệu</CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <p className="text-3xl font-semibold">{totalRows}</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Tổng số dòng lấy được từ các file.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_360px]">
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Upload className="h-4 w-4 text-muted-foreground" />
+                <CardTitle>Thêm file PDF</CardTitle>
+              </div>
+              <CardDescription>
+                Kéo thả file vào đây hoặc bấm chọn để đưa vào hàng đợi.
+              </CardDescription>
+            </CardHeader>
+
+            <CardContent className="space-y-6">
+              <div className="space-y-2">
+                <Label htmlFor="etsy-upload-file">File đầu vào</Label>
+
+                <Input
+                  ref={inputRef}
+                  id="etsy-upload-file"
+                  type="file"
+                  accept=".pdf,application/pdf"
+                  multiple
+                  className="hidden"
+                  onChange={handleChangeFile}
+                />
+
+                <div
+                  onClick={handleOpenFileDialog}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  className={`flex min-h-56 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed px-6 py-10 text-center transition-colors ${
+                    isDragging ? "border-primary bg-muted/70" : "bg-muted/20 hover:bg-muted/40"
+                  }`}
+                >
+                  <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full border bg-background">
+                    <Upload className="h-5 w-5" />
+                  </div>
+                  <p className="text-sm font-medium">
+                    Kéo thả file vào đây hoặc bấm để chọn
+                  </p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Có thể chọn nhiều file PDF cùng lúc
+                  </p>
+                </div>
+              </div>
+
+              {(errorMessage || successMessage) && (
+                <Alert variant={errorMessage ? "destructive" : "default"}>
+                  {errorMessage ? <X className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
+                  <AlertTitle>{errorMessage ? "Cần xử lý" : "Đã xong"}</AlertTitle>
+                  <AlertDescription>{errorMessage || successMessage}</AlertDescription>
+                </Alert>
+              )}
+
+              <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={files.length === 0 || files.some((file) => file.isUploading || file.isProcessing)}
+                  onClick={handleClearAll}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Xóa hết
+                </Button>
+
+                <Button
+                  type="submit"
+                  disabled={files.length === 0 || files.some((file) => file.isUploading || file.isProcessing)}
+                >
+                  <Upload className="mr-2 h-4 w-4" />
+                  {files.some((file) => file.isUploading)
+                    ? "Đang tải lên..."
+                    : files.some((file) => file.isProcessing)
+                      ? "Đang đọc..."
+                      : "Bắt đầu"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </form>
+
+        <Card>
           <CardHeader>
-            <CardTitle>Tải lên tệp Etsy</CardTitle>
-            <CardDescription>
-              Tải lên tệp PDF để chuyển đổi dữ liệu đơn hàng Etsy.
-            </CardDescription>
+            <div className="flex items-center gap-2">
+              <List className="h-4 w-4 text-muted-foreground" />
+              <CardTitle>Hàng đợi</CardTitle>
+            </div>
+            <CardDescription>Theo dõi trạng thái từng file.</CardDescription>
           </CardHeader>
 
-          <CardContent className="space-y-6">
-            <div className="space-y-2">
-              <Label htmlFor="etsy-upload-file">Tệp đầu vào</Label>
-
-              <Input
-                ref={inputRef}
-                id="etsy-upload-file"
-                type="file"
-                accept=".pdf,application/pdf"
-                multiple
-                className="hidden"
-                onChange={handleChangeFile}
-              />
-
-              <div
-                onClick={handleOpenFileDialog}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-                className={`flex min-h-56 cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed px-6 py-10 text-center transition ${
-                  isDragging ? "border-primary bg-muted" : "hover:bg-muted/50"
-                }`}
-              >
-                <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-                  <Upload className="h-5 w-5" />
-                </div>
-
-                <p className="text-sm font-medium">
-                  Kéo và thả tệp vào đây hoặc bấm để chọn
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Chỉ hỗ trợ tệp PDF
-                </p>
-              </div>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Đang xử lý</span>
+              <Badge variant="outline">{processingFiles}</Badge>
             </div>
 
-            {files.length > 0 && (
-              <div className="space-y-4 rounded-lg border p-4">
-                <div className="mb-3">
-                  <h3 className="font-medium text-sm">
-                    Danh sách tệp ({files.length})
-                  </h3>
-                </div>
+            {files.length === 0 ? (
+              <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+                Chưa có file nào trong hàng đợi.
+              </div>
+            ) : (
+              <div className="max-h-[520px] space-y-3 overflow-y-auto pr-1">
+                {files.map((item) => {
+                  const fileKey = getFileKey(item.file);
+                  const isProcessing = item.isUploading || item.isProcessing;
 
-                <div className="max-h-96 space-y-3 overflow-y-auto">
-                  {files.map((item) => {
-                    const fileKey = getFileKey(item.file);
-                    const isProcessing = item.isUploading || item.isProcessing;
-
-                    return (
-                      <div
-                        key={fileKey}
-                        className="flex flex-col gap-3 rounded-lg border p-3"
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="flex min-w-0 items-center gap-3">
-                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted">
-                              <FileText className="h-5 w-5" />
-                            </div>
-
-                            <div className="min-w-0">
-                              <p className="truncate text-sm font-medium">
-                                {item.file.name}
-                              </p>
-                              <p className="text-sm text-muted-foreground">
-                                {(item.file.size / 1024 / 1024).toFixed(2)} MB
-                              </p>
-                            </div>
+                  return (
+                    <div key={fileKey} className="rounded-lg border p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex min-w-0 items-start gap-3">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border bg-muted/30">
+                            <FileText className="h-4 w-4" />
                           </div>
-
-                          <div className="flex items-center gap-2">
-                            {item.isComplete && (
-                              <span className="rounded-full bg-green-100 px-2 py-1 text-xs text-green-800">
-                                Hoàn thành
-                              </span>
-                            )}
-
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleRemoveFile(fileKey)}
-                              disabled={isProcessing}
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium">{item.file.name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {formatFileSize(item.file.size)}
+                            </p>
                           </div>
                         </div>
 
-                        {isProcessing && (
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between text-sm text-muted-foreground">
-                              <span>
-                                {item.isUploading ? "Tải lên" : "Xử lý"}
-                              </span>
-                              <span>{item.progress}%</span>
-                            </div>
-                            <Progress value={item.progress} />
-                          </div>
-                        )}
-
-                        {item.error && (
-                          <p className="text-sm text-red-600">{item.error}</p>
-                        )}
+                        <div className="flex items-center gap-2">
+                          {item.isComplete && <Badge variant="secondary">Xong</Badge>}
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            onClick={() => handleRemoveFile(fileKey)}
+                            disabled={isProcessing}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </div>
-                    );
-                  })}
-                </div>
+
+                      {isProcessing && (
+                        <div className="mt-3 space-y-2">
+                          <div className="flex items-center justify-between text-xs text-muted-foreground">
+                            <span>{item.isUploading ? "Đang tải lên" : "Đang đọc"}</span>
+                            <span>{item.progress}%</span>
+                          </div>
+                          <Progress value={item.progress} />
+                        </div>
+                      )}
+
+                      {item.error && <p className="mt-3 text-sm text-destructive">{item.error}</p>}
+                    </div>
+                  );
+                })}
               </div>
             )}
-
-            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-              <Button
-                type="button"
-                variant="outline"
-                disabled={
-                  files.length === 0 ||
-                  files.some((f) => f.isUploading || f.isProcessing)
-                }
-                onClick={handleClearAll}
-              >
-                Xóa tất cả
-              </Button>
-
-              <Button
-                type="submit"
-                disabled={
-                  files.length === 0 ||
-                  files.some((f) => f.isUploading || f.isProcessing)
-                }
-              >
-                {files.some((f) => f.isUploading)
-                  ? "Đang tải lên..."
-                  : files.some((f) => f.isProcessing)
-                    ? "Đang xử lý..."
-                    : "Tải lên"}
-              </Button>
-            </div>
           </CardContent>
         </Card>
-      </form>
+      </div>
 
       {files.map((item) => {
-        if (item.isComplete && item.file) {
-          return (
-            <EtsyConvert
-              key={getFileKey(item.file)}
-              file={item.file}
-              onParsed={handleParsed}
-            />
-          );
+        if (!item.isComplete || !item.file) {
+          return null;
         }
-        return null;
+
+        return (
+          <EtsyConvert
+            key={getFileKey(item.file)}
+            file={item.file}
+            onParsed={handleParsed}
+          />
+        );
       })}
 
       {parsedDataList.length > 0 && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between gap-4">
-            <h2 className="text-lg font-semibold">Kết quả xử lý</h2>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={handleCopyAllContent}
-              className="gap-2"
-            >
-              <Copy className="h-4 w-4" />
-              Sao chép tất cả file
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <Database className="h-4 w-4 text-muted-foreground" />
+                <h2 className="text-lg font-semibold">Kết quả</h2>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Dữ liệu được tách theo từng file để kiểm tra hoặc sao chép.
+              </p>
+            </div>
+
+            <Button type="button" variant="outline" onClick={handleCopyAllContent}>
+              <Copy className="mr-2 h-4 w-4" />
+              Sao chép tất cả
             </Button>
           </div>
 
-          {parsedDataList.map((data, index) => (
-            <EtsyResult key={index} data={data} />
-          ))}
+          <div className="space-y-4">
+            {parsedDataList.map((data, index) => (
+              <EtsyResult key={`${index}-${data.length}`} data={data} />
+            ))}
+          </div>
         </div>
       )}
     </div>
