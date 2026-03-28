@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - main
+    paths:
+      - ".github/workflows/release.yml"
+      - "release.config.json"
+      - "scripts/prepare-release.cjs"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -32,10 +37,14 @@ jobs:
         run: |
           $tag = "${{ steps.release.outputs.tag }}"
           gh release view $tag *> $null
-          if ($LASTEXITCODE -eq 0) {
+          $releaseExists = $LASTEXITCODE -eq 0
+
+          if ($releaseExists) {
             Write-Error "Release tag $tag already exists. Increase release.config.json version before merging to main."
             exit 1
           }
+
+          exit 0
 
       - name: Install dependencies
         run: npm ci
@@ -59,6 +68,5 @@ jobs:
           prerelease: false
           files: |
             out/make/**/*.exe
-            out/make/**/*.nupkg
-            out/make/**/RELEASES
-            out/make/**/*.zip
+            out/make/**/*.yml
+            out/make/**/*.blockmap

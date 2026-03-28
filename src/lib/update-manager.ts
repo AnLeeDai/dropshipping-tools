@@ -1,10 +1,11 @@
-import { app, autoUpdater, BrowserWindow, ipcMain } from "electron";
+import fs from "node:fs";
+import path from "node:path";
+import { app, BrowserWindow, ipcMain } from "electron";
+import { autoUpdater, type UpdateDownloadedEvent, type UpdateInfo } from "electron-updater";
 import { currentReleaseMetadata, releaseConfig } from "../config/release-config";
 import {
   compareVersions,
   formatUpdaterErrorMessage,
-  getUpdateDeferralInfo,
-  getKnownUpdateDetails,
   normalizeVersion,
   type ReleaseMetadata,
 } from "./update-utils";
@@ -35,8 +36,8 @@ export interface UpdateState {
 }
 
 const RELEASE_LOOKUP_TIMEOUT_MS = 10000;
-const NATIVE_UPDATE_TIMEOUT_MS = 30000;
-const FIRST_RUN_UPDATE_DELAY_MS = 15000;
+const UPDATE_CHECK_TIMEOUT_MS = 30000;
+const STARTUP_UPDATE_DELAY_MS = 5000;
 
 let mainWindow: BrowserWindow | null = null;
 let scheduledCheck: NodeJS.Timeout | null = null;
@@ -47,10 +48,6 @@ let pendingNativeCheck: Promise<UpdateState> | null = null;
 let pendingNativeCheckResolve: ((state: UpdateState) => void) | null = null;
 let pendingNativeCheckReject: ((error: Error) => void) | null = null;
 let pendingNativeCheckTimeout: NodeJS.Timeout | null = null;
-let firstRunUpdateAvailableAt: number | null =
-  process.platform === "win32" && process.argv.includes("--squirrel-firstrun")
-    ? Date.now() + FIRST_RUN_UPDATE_DELAY_MS
-    : null;
 
 let updateState: UpdateState = {
   hasUpdate: false,
@@ -77,23 +74,12 @@ function getRepositorySlug(): string {
   return `${owner}/${name}`;
 }
 
-function getDeferredUpdateState() {
-  const deferredState = getUpdateDeferralInfo(firstRunUpdateAvailableAt);
-
-  if (!deferredState.isDeferred) {
-    firstRunUpdateAvailableAt = null;
-  }
-
-  return deferredState;
+function getUpdateConfigPath(): string {
+  return path.join(process.resourcesPath, "app-update.yml");
 }
 
 function canUseNativeAutoUpdate(): boolean {
-  return app.isPackaged && (process.platform === "win32" || process.platform === "darwin");
-}
-
-function buildFeedUrl(): string {
-  const { owner, name } = releaseConfig.repository;
-  return `https://update.electronjs.org/${owner}/${name}/${process.platform}-${process.arch}/${app.getVersion()}`;
+  return app.isPackaged && process.platform === "win32" && fs.existsSync(getUpdateConfigPath());
 }
 
 function updateSnapshot(partialState: Partial<UpdateState>): UpdateState {
@@ -119,17 +105,6 @@ function getCachedReleaseMetadata(): ReleaseMetadata {
   return latestReleaseMetadata ?? currentReleaseMetadata;
 }
 
-function applyReleaseMetadata(metadata: ReleaseMetadata): UpdateState {
-  const details = getKnownUpdateDetails(metadata, getCurrentVersion());
-
-  return updateSnapshot({
-    releaseName: metadata.releaseName,
-    releaseNotes: metadata.releaseNotes,
-    releaseDate: metadata.releaseDate,
-    newVersion: details.newVersion ?? (updateState.hasUpdate ? updateState.newVersion : undefined),
-  });
-}
-
 function normalizeReleaseDate(value: Date | string | null | undefined): string | null {
   if (!value) {
     return null;
@@ -141,6 +116,56 @@ function normalizeReleaseDate(value: Date | string | null | undefined): string |
 
   const parsedDate = new Date(value);
   return Number.isNaN(parsedDate.getTime()) ? null : parsedDate.toISOString();
+}
+
+function normalizeReleaseNotes(releaseNotes: UpdateInfo["releaseNotes"] | undefined | null): string | undefined {
+  if (!releaseNotes) {
+    return undefined;
+  }
+
+  if (typeof releaseNotes === "string") {
+    const normalized = releaseNotes.trim();
+    return normalized.length > 0 ? normalized : undefined;
+  }
+
+  const normalized = releaseNotes
+    .map((entry) => entry.note?.trim())
+    .filter((entry): entry is string => Boolean(entry))
+    .join("\n\n")
+    .trim();
+
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function createReleaseMetadataFromUpdateInfo(info: Partial<UpdateInfo> | null | undefined): ReleaseMetadata | null {
+  const version = info?.version?.trim();
+  if (!version) {
+    return null;
+  }
+
+  const normalizedVersion = normalizeVersion(version);
+
+  return {
+    version: normalizedVersion,
+    releaseName: info.releaseName?.trim() || `v${normalizedVersion}`,
+    releaseNotes: normalizeReleaseNotes(info.releaseNotes) || currentReleaseMetadata.releaseNotes,
+    releaseDate: normalizeReleaseDate(info.releaseDate) || currentReleaseMetadata.releaseDate,
+  };
+}
+
+function buildStateFromMetadata(
+  metadata: ReleaseMetadata,
+  partialState: Partial<UpdateState>,
+): UpdateState {
+  const hasUpdate = compareVersions(metadata.version, getCurrentVersion()) > 0;
+
+  return updateSnapshot({
+    releaseName: metadata.releaseName,
+    releaseNotes: metadata.releaseNotes,
+    releaseDate: metadata.releaseDate,
+    newVersion: hasUpdate ? metadata.version : undefined,
+    ...partialState,
+  });
 }
 
 function clearPendingNativeCheck(): void {
@@ -223,7 +248,9 @@ async function fetchLatestReleaseMetadata(): Promise<ReleaseMetadata> {
   }
 }
 
-async function syncLatestReleaseMetadata(emitChannel?: "update:available" | "update:downloaded"): Promise<ReleaseMetadata | null> {
+async function syncLatestReleaseMetadata(
+  emitChannel?: "update:available" | "update:downloaded",
+): Promise<ReleaseMetadata | null> {
   if (metadataSyncInFlight) {
     return metadataSyncInFlight;
   }
@@ -231,7 +258,7 @@ async function syncLatestReleaseMetadata(emitChannel?: "update:available" | "upd
   const request = fetchLatestReleaseMetadata()
     .then((metadata) => {
       latestReleaseMetadata = metadata;
-      applyReleaseMetadata(metadata);
+      buildStateFromMetadata(metadata, {});
 
       if (emitChannel) {
         sendSnapshot(emitChannel);
@@ -256,7 +283,7 @@ async function syncLatestReleaseMetadata(emitChannel?: "update:available" | "upd
 
 function ensureNativeCheckAvailable(): void {
   if (!canUseNativeAutoUpdate()) {
-    throw new Error("Auto update is only available in packaged Windows and macOS builds.");
+    throw new Error("Auto update is only available in packaged Windows installer builds.");
   }
 }
 
@@ -278,22 +305,24 @@ function runNativeUpdateCheck(): Promise<UpdateState> {
 
   const currentPromise = pendingNativeCheck;
   pendingNativeCheckTimeout = setTimeout(() => {
-    rejectNativeCheck(new Error("Timed out while waiting for the native update service."));
-  }, NATIVE_UPDATE_TIMEOUT_MS);
+    rejectNativeCheck(new Error("Timed out while waiting for the update service."));
+  }, UPDATE_CHECK_TIMEOUT_MS);
 
   try {
-    autoUpdater.checkForUpdates();
+    void autoUpdater.checkForUpdates().catch((error) => {
+      const updateError = error instanceof Error ? error : new Error("Unknown update error");
+      rejectNativeCheck(updateError);
+    });
   } catch (error) {
-    const nativeError = error instanceof Error ? error : new Error("Unknown update error");
-    rejectNativeCheck(nativeError);
-    return Promise.reject(nativeError);
+    const updateError = error instanceof Error ? error : new Error("Unknown update error");
+    rejectNativeCheck(updateError);
+    return Promise.reject(updateError);
   }
 
   return currentPromise;
 }
 
 async function refreshUpdateState(options?: {
-  triggerBackgroundDownload?: boolean;
   emitErrors?: boolean;
 }): Promise<UpdateState> {
   const emitErrors = options?.emitErrors ?? true;
@@ -306,20 +335,6 @@ async function refreshUpdateState(options?: {
 
   try {
     if (canUseNativeAutoUpdate()) {
-      const deferredState = getDeferredUpdateState();
-      if (deferredState.isDeferred) {
-        return updateSnapshot({
-          hasUpdate: false,
-          newVersion: undefined,
-          isDownloading: false,
-          isUpdateReady: false,
-          isUpdateDeferred: true,
-          deferredReason: deferredState.deferredReason,
-          deferredUntil: deferredState.deferredUntil,
-          error: null,
-        });
-      }
-
       updateSnapshot({
         isUpdateDeferred: false,
         deferredReason: null,
@@ -337,14 +352,9 @@ async function refreshUpdateState(options?: {
 
     const releaseMetadata = await fetchLatestReleaseMetadata();
     latestReleaseMetadata = releaseMetadata;
-    const hasUpdate = compareVersions(releaseMetadata.version, getCurrentVersion()) > 0;
 
-    updateSnapshot({
-      hasUpdate,
-      newVersion: hasUpdate ? releaseMetadata.version : undefined,
-      releaseName: releaseMetadata.releaseName,
-      releaseNotes: releaseMetadata.releaseNotes,
-      releaseDate: releaseMetadata.releaseDate,
+    return buildStateFromMetadata(releaseMetadata, {
+      hasUpdate: compareVersions(releaseMetadata.version, getCurrentVersion()) > 0,
       isDownloading: false,
       isUpdateReady: false,
       isUpdateDeferred: false,
@@ -353,8 +363,6 @@ async function refreshUpdateState(options?: {
       error: null,
       lastCheckedAt: checkedAt,
     });
-
-    return updateState;
   } catch (error) {
     const rawMessage = error instanceof Error ? error.message : "Unknown update error";
     const message = formatUpdaterErrorMessage(rawMessage, getRepositorySlug());
@@ -385,16 +393,12 @@ function registerAutoUpdaterEvents(): void {
 
   autoUpdaterEventsRegistered = true;
 
-  autoUpdater.on("update-available", () => {
-    const metadata = getCachedReleaseMetadata();
-    const details = getKnownUpdateDetails(metadata, getCurrentVersion());
+  autoUpdater.on("update-available", (info: UpdateInfo) => {
+    const metadata = createReleaseMetadataFromUpdateInfo(info) ?? getCachedReleaseMetadata();
+    latestReleaseMetadata = metadata;
 
-    updateSnapshot({
+    const state = buildStateFromMetadata(metadata, {
       hasUpdate: true,
-      newVersion: details.newVersion,
-      releaseName: details.releaseName,
-      releaseNotes: details.releaseNotes,
-      releaseDate: details.releaseDate,
       isDownloading: true,
       isUpdateReady: false,
       isUpdateDeferred: false,
@@ -404,19 +408,29 @@ function registerAutoUpdaterEvents(): void {
     });
 
     sendSnapshot("update:available");
-    resolveNativeCheck(updateState);
+    resolveNativeCheck(state);
     void syncLatestReleaseMetadata("update:available");
   });
 
-  autoUpdater.on("update-not-available", () => {
-    latestReleaseMetadata = currentReleaseMetadata;
+  autoUpdater.on("download-progress", () => {
+    if (updateState.isUpdateReady) {
+      return;
+    }
 
     updateSnapshot({
+      hasUpdate: true,
+      isDownloading: true,
+      error: null,
+    });
+  });
+
+  autoUpdater.on("update-not-available", (info: UpdateInfo) => {
+    const metadata = createReleaseMetadataFromUpdateInfo(info) ?? currentReleaseMetadata;
+    latestReleaseMetadata = metadata;
+
+    const state = buildStateFromMetadata(metadata, {
       hasUpdate: false,
       newVersion: undefined,
-      releaseName: currentReleaseMetadata.releaseName,
-      releaseNotes: currentReleaseMetadata.releaseNotes,
-      releaseDate: currentReleaseMetadata.releaseDate,
       isDownloading: false,
       isUpdateReady: false,
       isUpdateDeferred: false,
@@ -426,25 +440,15 @@ function registerAutoUpdaterEvents(): void {
     });
 
     sendSnapshot("update:not-available");
-    resolveNativeCheck(updateState);
+    resolveNativeCheck(state);
   });
 
-  autoUpdater.on("update-downloaded", (...args: unknown[]) => {
-    const metadata = getCachedReleaseMetadata();
-    const details = getKnownUpdateDetails(metadata, getCurrentVersion());
-    const [, releaseNotes, releaseName, releaseDate] = args as [
-      unknown,
-      string | undefined,
-      string | undefined,
-      string | Date | undefined,
-    ];
+  autoUpdater.on("update-downloaded", (info: UpdateDownloadedEvent) => {
+    const metadata = createReleaseMetadataFromUpdateInfo(info) ?? getCachedReleaseMetadata();
+    latestReleaseMetadata = metadata;
 
-    updateSnapshot({
+    const state = buildStateFromMetadata(metadata, {
       hasUpdate: true,
-      newVersion: details.newVersion ?? updateState.newVersion,
-      releaseName: releaseName?.trim() || details.releaseName || updateState.releaseName,
-      releaseNotes: releaseNotes?.trim() || details.releaseNotes || updateState.releaseNotes,
-      releaseDate: normalizeReleaseDate(releaseDate) || details.releaseDate || updateState.releaseDate || null,
       isDownloading: false,
       isUpdateReady: true,
       isUpdateDeferred: false,
@@ -454,7 +458,7 @@ function registerAutoUpdaterEvents(): void {
     });
 
     sendSnapshot("update:downloaded");
-    resolveNativeCheck(updateState);
+    resolveNativeCheck(state);
     void syncLatestReleaseMetadata("update:downloaded");
   });
 
@@ -463,7 +467,7 @@ function registerAutoUpdaterEvents(): void {
     const message = formatUpdaterErrorMessage(rawMessage, getRepositorySlug());
 
     console.error("Native auto-update failed", {
-      feedUrl: buildFeedUrl(),
+      configPath: getUpdateConfigPath(),
       repository: getRepositorySlug(),
       rawMessage,
     });
@@ -481,44 +485,37 @@ function registerAutoUpdaterEvents(): void {
 export function initializeUpdater(window: BrowserWindow): void {
   mainWindow = window;
   latestReleaseMetadata = currentReleaseMetadata;
-  const deferredState = getDeferredUpdateState();
 
   updateSnapshot({
     currentVersion: getCurrentVersion(),
     releaseName: currentReleaseMetadata.releaseName,
     releaseNotes: currentReleaseMetadata.releaseNotes,
     releaseDate: currentReleaseMetadata.releaseDate,
-    isUpdateDeferred: deferredState.isDeferred,
-    deferredReason: deferredState.deferredReason,
-    deferredUntil: deferredState.deferredUntil,
+    isUpdateDeferred: false,
+    deferredReason: null,
+    deferredUntil: null,
   });
 
   if (!canUseNativeAutoUpdate()) {
-    console.log("Native auto-update is disabled in development or on an unsupported platform.");
+    console.log("Auto-update is disabled in development or in builds without app-update.yml.");
     return;
   }
 
-  autoUpdater.setFeedURL({
-    url: buildFeedUrl(),
-  });
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = false;
 
   registerAutoUpdaterEvents();
 
-  const initialDelay = firstRunUpdateAvailableAt
-    ? Math.max(1000, firstRunUpdateAvailableAt - Date.now())
-    : 5000;
   setTimeout(() => {
     void refreshUpdateState({
-      triggerBackgroundDownload: true,
       emitErrors: false,
     });
-  }, initialDelay);
+  }, STARTUP_UPDATE_DELAY_MS);
 
   const intervalMs = releaseConfig.autoUpdate.checkIntervalMinutes * 60 * 1000;
   if (!scheduledCheck) {
     scheduledCheck = setInterval(() => {
       void refreshUpdateState({
-        triggerBackgroundDownload: true,
         emitErrors: false,
       });
     }, intervalMs);
@@ -528,7 +525,6 @@ export function initializeUpdater(window: BrowserWindow): void {
 export function setupUpdateHandlers(): void {
   ipcMain.handle("updater:check-for-updates", async () => {
     return refreshUpdateState({
-      triggerBackgroundDownload: true,
       emitErrors: true,
     });
   });

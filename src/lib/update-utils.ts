@@ -143,7 +143,7 @@ export function formatUpdaterErrorMessage(rawMessage: string, repository?: strin
   const repoLabel = repository ? ` cho repo ${repository}` : "";
 
   if (/404|not found/i.test(message)) {
-    return `Không tìm thấy feed cập nhật (404)${repoLabel}. Hãy kiểm tra GitHub Release đã publish công khai và có đủ file RELEASES, .nupkg, và Setup.exe.`;
+    return `Không tìm thấy feed cập nhật (404)${repoLabel}. Hãy kiểm tra GitHub Release đã publish công khai và có đủ file latest.yml, .blockmap, và Setup.exe.`;
   }
 
   if (/403|forbidden/i.test(message)) {

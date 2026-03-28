@@ -86,11 +86,11 @@ test("getUpdateDeferralInfo returns a non-error wait state during first-run cool
 
 test("formatUpdaterErrorMessage compresses native 404 update failures into actionable text", () => {
   const formatted = formatUpdaterErrorMessage(
-    "Command failed: 4294967295 System.AggregateException ... (404) Not Found ... Squirrel.Update.Program",
+    "Cannot find channel \"latest.yml\" update info: HttpError: 404 Not Found",
     "AnLeeDai/dropshipping-tools",
   );
 
   assert.match(formatted, /Không tìm thấy feed cập nhật/);
   assert.match(formatted, /AnLeeDai\/dropshipping-tools/);
-  assert.match(formatted, /RELEASES/);
+  assert.match(formatted, /latest\.yml/);
 });
