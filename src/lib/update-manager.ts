@@ -1,11 +1,11 @@
 import { app, autoUpdater, BrowserWindow, ipcMain } from "electron";
+import { currentReleaseMetadata, releaseConfig } from "../config/release-config";
 import {
   compareVersions,
-  currentRelease,
-  formatReleaseNotes,
+  getKnownUpdateDetails,
   normalizeVersion,
-  releaseConfig,
-} from "../config/release-config";
+  type ReleaseMetadata,
+} from "./update-utils";
 
 interface GitHubReleaseResponse {
   tag_name: string;
@@ -13,13 +13,6 @@ interface GitHubReleaseResponse {
   body: string | null;
   published_at: string | null;
   created_at: string | null;
-}
-
-interface ReleaseMetadata {
-  version: string;
-  releaseName: string;
-  releaseNotes: string;
-  releaseDate: string | null;
 }
 
 export interface UpdateState {
@@ -36,28 +29,35 @@ export interface UpdateState {
   lastCheckedAt: string | null;
 }
 
+const RELEASE_LOOKUP_TIMEOUT_MS = 10000;
+const NATIVE_UPDATE_TIMEOUT_MS = 30000;
+
 let mainWindow: BrowserWindow | null = null;
 let scheduledCheck: NodeJS.Timeout | null = null;
 let autoUpdaterEventsRegistered = false;
-let latestReleaseMetadata: ReleaseMetadata | null = {
-  version: currentRelease.version,
-  releaseName: currentRelease.name,
-  releaseNotes: formatReleaseNotes(currentRelease.notes),
-  releaseDate: currentRelease.publishedAt,
-};
+let latestReleaseMetadata: ReleaseMetadata | null = currentReleaseMetadata;
+let metadataSyncInFlight: Promise<ReleaseMetadata | null> | null = null;
+let pendingNativeCheck: Promise<UpdateState> | null = null;
+let pendingNativeCheckResolve: ((state: UpdateState) => void) | null = null;
+let pendingNativeCheckReject: ((error: Error) => void) | null = null;
+let pendingNativeCheckTimeout: NodeJS.Timeout | null = null;
 
 let updateState: UpdateState = {
   hasUpdate: false,
-  currentVersion: currentRelease.version,
-  releaseName: currentRelease.name,
-  releaseNotes: formatReleaseNotes(currentRelease.notes),
-  releaseDate: currentRelease.publishedAt,
+  currentVersion: currentReleaseMetadata.version,
+  releaseName: currentReleaseMetadata.releaseName,
+  releaseNotes: currentReleaseMetadata.releaseNotes,
+  releaseDate: currentReleaseMetadata.releaseDate,
   canAutoUpdate: false,
   isDownloading: false,
   isUpdateReady: false,
   error: null,
   lastCheckedAt: null,
 };
+
+function getCurrentVersion(): string {
+  return normalizeVersion(app.getVersion());
+}
 
 function canUseNativeAutoUpdate(): boolean {
   return app.isPackaged && (process.platform === "win32" || process.platform === "darwin");
@@ -71,7 +71,7 @@ function buildFeedUrl(): string {
 function updateSnapshot(partialState: Partial<UpdateState>): UpdateState {
   updateState = {
     ...updateState,
-    currentVersion: app.getVersion(),
+    currentVersion: getCurrentVersion(),
     canAutoUpdate: canUseNativeAutoUpdate(),
     ...partialState,
   };
@@ -88,64 +88,212 @@ function sendSnapshot(channel: string): void {
 }
 
 function getCachedReleaseMetadata(): ReleaseMetadata {
-  return (
-    latestReleaseMetadata ?? {
-      version: currentRelease.version,
-      releaseName: currentRelease.name,
-      releaseNotes: formatReleaseNotes(currentRelease.notes),
-      releaseDate: currentRelease.publishedAt,
-    }
-  );
+  return latestReleaseMetadata ?? currentReleaseMetadata;
+}
+
+function applyReleaseMetadata(metadata: ReleaseMetadata): UpdateState {
+  const details = getKnownUpdateDetails(metadata, getCurrentVersion());
+
+  return updateSnapshot({
+    releaseName: metadata.releaseName,
+    releaseNotes: metadata.releaseNotes,
+    releaseDate: metadata.releaseDate,
+    newVersion: details.newVersion ?? (updateState.hasUpdate ? updateState.newVersion : undefined),
+  });
+}
+
+function normalizeReleaseDate(value: Date | string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value.toISOString();
+  }
+
+  const parsedDate = new Date(value);
+  return Number.isNaN(parsedDate.getTime()) ? null : parsedDate.toISOString();
+}
+
+function clearPendingNativeCheck(): void {
+  if (pendingNativeCheckTimeout) {
+    clearTimeout(pendingNativeCheckTimeout);
+    pendingNativeCheckTimeout = null;
+  }
+
+  pendingNativeCheck = null;
+  pendingNativeCheckResolve = null;
+  pendingNativeCheckReject = null;
+}
+
+function resolveNativeCheck(state: UpdateState): void {
+  const resolve = pendingNativeCheckResolve;
+  clearPendingNativeCheck();
+  resolve?.(state);
+}
+
+function rejectNativeCheck(error: Error): void {
+  const reject = pendingNativeCheckReject;
+  clearPendingNativeCheck();
+  reject?.(error);
+}
+
+function createReleaseLookupError(error: unknown): Error {
+  if (error instanceof Error && error.name === "AbortError") {
+    return new Error("Timed out while loading release metadata from GitHub Releases.");
+  }
+
+  if (error instanceof Error) {
+    return error;
+  }
+
+  return new Error("Unknown release metadata error");
 }
 
 async function fetchLatestReleaseMetadata(): Promise<ReleaseMetadata> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), RELEASE_LOOKUP_TIMEOUT_MS);
   const { owner, name } = releaseConfig.repository;
-  const response = await fetch(`https://api.github.com/repos/${owner}/${name}/releases/latest`, {
-    headers: {
-      Accept: "application/vnd.github+json",
-      "User-Agent": app.getName(),
-    },
-  });
 
-  if (!response.ok) {
-    throw new Error(`GitHub release lookup failed with status ${response.status}`);
+  try {
+    const response = await fetch(`https://api.github.com/repos/${owner}/${name}/releases/latest`, {
+      headers: {
+        Accept: "application/vnd.github+json",
+        "User-Agent": app.getName(),
+      },
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      if (response.status === 403) {
+        throw new Error("GitHub Releases metadata is temporarily unavailable. Try again in a few minutes.");
+      }
+
+      if (response.status === 404) {
+        throw new Error("No published GitHub Release was found for this repository.");
+      }
+
+      throw new Error(`GitHub release lookup failed with status ${response.status}`);
+    }
+
+    const payload = (await response.json()) as GitHubReleaseResponse;
+    const releaseNotes =
+      payload.body && payload.body.trim().length > 0
+        ? payload.body.trim()
+        : currentReleaseMetadata.releaseNotes;
+
+    return {
+      version: normalizeVersion(payload.tag_name || payload.name || currentReleaseMetadata.version),
+      releaseName: payload.name?.trim() || `v${normalizeVersion(payload.tag_name || currentReleaseMetadata.version)}`,
+      releaseNotes,
+      releaseDate: payload.published_at || payload.created_at || currentReleaseMetadata.releaseDate,
+    };
+  } catch (error) {
+    throw createReleaseLookupError(error);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function syncLatestReleaseMetadata(emitChannel?: "update:available" | "update:downloaded"): Promise<ReleaseMetadata | null> {
+  if (metadataSyncInFlight) {
+    return metadataSyncInFlight;
   }
 
-  const payload = (await response.json()) as GitHubReleaseResponse;
-  const releaseNotes =
-    payload.body && payload.body.trim().length > 0
-      ? payload.body.trim()
-      : formatReleaseNotes(currentRelease.notes);
+  const request = fetchLatestReleaseMetadata()
+    .then((metadata) => {
+      latestReleaseMetadata = metadata;
+      applyReleaseMetadata(metadata);
 
-  latestReleaseMetadata = {
-    version: normalizeVersion(payload.tag_name || payload.name || currentRelease.version),
-    releaseName: payload.name?.trim() || `v${normalizeVersion(payload.tag_name)}`,
-    releaseNotes,
-    releaseDate: payload.published_at || payload.created_at || currentRelease.publishedAt,
-  };
+      if (emitChannel) {
+        sendSnapshot(emitChannel);
+      }
 
-  return latestReleaseMetadata;
+      return metadata;
+    })
+    .catch((error) => {
+      const message = error instanceof Error ? error.message : "Unknown release metadata error";
+      console.warn("Release metadata sync failed:", message);
+      return null;
+    })
+    .finally(() => {
+      if (metadataSyncInFlight === request) {
+        metadataSyncInFlight = null;
+      }
+    });
+
+  metadataSyncInFlight = request;
+  return request;
+}
+
+function ensureNativeCheckAvailable(): void {
+  if (!canUseNativeAutoUpdate()) {
+    throw new Error("Auto update is only available in packaged Windows and macOS builds.");
+  }
+
+  if (process.platform === "win32" && process.argv.includes("--squirrel-firstrun")) {
+    throw new Error("Updates are unavailable during the first launch after install. Wait a few seconds and try again.");
+  }
+}
+
+function runNativeUpdateCheck(): Promise<UpdateState> {
+  ensureNativeCheckAvailable();
+
+  if (updateState.isDownloading || updateState.isUpdateReady) {
+    return Promise.resolve(getUpdaterState());
+  }
+
+  if (pendingNativeCheck) {
+    return pendingNativeCheck;
+  }
+
+  pendingNativeCheck = new Promise<UpdateState>((resolve, reject) => {
+    pendingNativeCheckResolve = resolve;
+    pendingNativeCheckReject = reject;
+  });
+
+  const currentPromise = pendingNativeCheck;
+  pendingNativeCheckTimeout = setTimeout(() => {
+    rejectNativeCheck(new Error("Timed out while waiting for the native update service."));
+  }, NATIVE_UPDATE_TIMEOUT_MS);
+
+  try {
+    autoUpdater.checkForUpdates();
+  } catch (error) {
+    const nativeError = error instanceof Error ? error : new Error("Unknown update error");
+    rejectNativeCheck(nativeError);
+    return Promise.reject(nativeError);
+  }
+
+  return currentPromise;
 }
 
 async function refreshUpdateState(options?: {
   triggerBackgroundDownload?: boolean;
   emitErrors?: boolean;
 }): Promise<UpdateState> {
-  const triggerBackgroundDownload = options?.triggerBackgroundDownload ?? false;
   const emitErrors = options?.emitErrors ?? true;
   const checkedAt = new Date().toISOString();
 
   updateSnapshot({
-    currentVersion: app.getVersion(),
     error: null,
     lastCheckedAt: checkedAt,
   });
 
   try {
+    if (canUseNativeAutoUpdate()) {
+      const nativeState = await runNativeUpdateCheck();
+
+      if (nativeState.hasUpdate || nativeState.isUpdateReady) {
+        await syncLatestReleaseMetadata();
+      }
+
+      return updateState;
+    }
+
     const releaseMetadata = await fetchLatestReleaseMetadata();
-    const hasUpdate = compareVersions(releaseMetadata.version, app.getVersion()) > 0;
-    const shouldStartNativeDownload =
-      hasUpdate && triggerBackgroundDownload && canUseNativeAutoUpdate();
+    latestReleaseMetadata = releaseMetadata;
+    const hasUpdate = compareVersions(releaseMetadata.version, getCurrentVersion()) > 0;
 
     updateSnapshot({
       hasUpdate,
@@ -153,22 +301,11 @@ async function refreshUpdateState(options?: {
       releaseName: releaseMetadata.releaseName,
       releaseNotes: releaseMetadata.releaseNotes,
       releaseDate: releaseMetadata.releaseDate,
-      isDownloading: shouldStartNativeDownload ? true : false,
-      isUpdateReady: hasUpdate ? updateState.isUpdateReady : false,
+      isDownloading: false,
+      isUpdateReady: false,
       error: null,
       lastCheckedAt: checkedAt,
     });
-
-    if (hasUpdate && shouldStartNativeDownload) {
-      autoUpdater.checkForUpdates();
-    }
-
-    if (!hasUpdate) {
-      updateSnapshot({
-        isDownloading: false,
-        isUpdateReady: false,
-      });
-    }
 
     return updateState;
   } catch (error) {
@@ -182,12 +319,11 @@ async function refreshUpdateState(options?: {
 
     if (emitErrors) {
       sendSnapshot("update:error");
-    } else {
-      console.error("Silent update check failed:", message);
-      return updateState;
+      throw new Error(message);
     }
 
-    throw new Error(message);
+    console.error("Silent update check failed:", message);
+    return updateState;
   }
 }
 
@@ -200,54 +336,66 @@ function registerAutoUpdaterEvents(): void {
 
   autoUpdater.on("update-available", () => {
     const metadata = getCachedReleaseMetadata();
+    const details = getKnownUpdateDetails(metadata, getCurrentVersion());
 
     updateSnapshot({
       hasUpdate: true,
-      newVersion: metadata.version,
-      releaseName: metadata.releaseName,
-      releaseNotes: metadata.releaseNotes,
-      releaseDate: metadata.releaseDate,
+      newVersion: details.newVersion,
+      releaseName: details.releaseName,
+      releaseNotes: details.releaseNotes,
+      releaseDate: details.releaseDate,
       isDownloading: true,
       isUpdateReady: false,
       error: null,
     });
 
     sendSnapshot("update:available");
+    resolveNativeCheck(updateState);
+    void syncLatestReleaseMetadata("update:available");
   });
 
   autoUpdater.on("update-not-available", () => {
+    latestReleaseMetadata = currentReleaseMetadata;
+
     updateSnapshot({
       hasUpdate: false,
       newVersion: undefined,
+      releaseName: currentReleaseMetadata.releaseName,
+      releaseNotes: currentReleaseMetadata.releaseNotes,
+      releaseDate: currentReleaseMetadata.releaseDate,
       isDownloading: false,
       isUpdateReady: false,
       error: null,
     });
 
     sendSnapshot("update:not-available");
+    resolveNativeCheck(updateState);
   });
 
   autoUpdater.on("update-downloaded", (...args: unknown[]) => {
     const metadata = getCachedReleaseMetadata();
+    const details = getKnownUpdateDetails(metadata, getCurrentVersion());
     const [, releaseNotes, releaseName, releaseDate] = args as [
       unknown,
       string | undefined,
       string | undefined,
-      string | undefined,
+      string | Date | undefined,
     ];
 
     updateSnapshot({
       hasUpdate: true,
-      newVersion: metadata.version,
-      releaseName: releaseName?.trim() || metadata.releaseName,
-      releaseNotes: releaseNotes?.trim() || metadata.releaseNotes,
-      releaseDate: releaseDate || metadata.releaseDate,
+      newVersion: details.newVersion ?? updateState.newVersion,
+      releaseName: releaseName?.trim() || details.releaseName || updateState.releaseName,
+      releaseNotes: releaseNotes?.trim() || details.releaseNotes || updateState.releaseNotes,
+      releaseDate: normalizeReleaseDate(releaseDate) || details.releaseDate || updateState.releaseDate || null,
       isDownloading: false,
       isUpdateReady: true,
       error: null,
     });
 
     sendSnapshot("update:downloaded");
+    resolveNativeCheck(updateState);
+    void syncLatestReleaseMetadata("update:downloaded");
   });
 
   autoUpdater.on("error", (error) => {
@@ -259,17 +407,19 @@ function registerAutoUpdaterEvents(): void {
     });
 
     sendSnapshot("update:error");
+    rejectNativeCheck(new Error(message));
   });
 }
 
 export function initializeUpdater(window: BrowserWindow): void {
   mainWindow = window;
+  latestReleaseMetadata = currentReleaseMetadata;
 
   updateSnapshot({
-    currentVersion: app.getVersion(),
-    releaseName: currentRelease.name,
-    releaseNotes: formatReleaseNotes(currentRelease.notes),
-    releaseDate: currentRelease.publishedAt,
+    currentVersion: getCurrentVersion(),
+    releaseName: currentReleaseMetadata.releaseName,
+    releaseNotes: currentReleaseMetadata.releaseNotes,
+    releaseDate: currentReleaseMetadata.releaseDate,
   });
 
   if (!canUseNativeAutoUpdate()) {
@@ -339,4 +489,6 @@ export function disposeUpdater(): void {
     clearInterval(scheduledCheck);
     scheduledCheck = null;
   }
+
+  clearPendingNativeCheck();
 }

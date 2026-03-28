@@ -1,5 +1,5 @@
 import * as React from "react";
-import { currentRelease } from "@/config/release-config";
+import { currentReleaseMetadata } from "@/config/release-config";
 
 interface UpdateInfo {
   hasUpdate: boolean;
@@ -48,10 +48,10 @@ declare global {
 
 const initialSnapshot: UpdaterSnapshot = {
   hasUpdate: false,
-  currentVersion: currentRelease.version,
-  releaseName: currentRelease.name,
-  releaseNotes: currentRelease.notes.join("\n"),
-  releaseDate: currentRelease.publishedAt,
+  currentVersion: currentReleaseMetadata.version,
+  releaseName: currentReleaseMetadata.releaseName,
+  releaseNotes: currentReleaseMetadata.releaseNotes,
+  releaseDate: currentReleaseMetadata.releaseDate,
   canAutoUpdate: false,
   isDownloading: false,
   isUpdateReady: false,

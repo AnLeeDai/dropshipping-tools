@@ -16,7 +16,8 @@
     "make": "electron-forge make",
     "publish": "electron-forge publish",
     "release:prepare": "node scripts/prepare-release.cjs",
-    "lint": "eslint --ext .ts,.tsx ."
+    "lint": "eslint --ext .ts,.tsx .",
+    "test": "node --experimental-strip-types --test tests/update-utils.test.mjs"
   },
   "keywords": [],
   "author": "TUF",

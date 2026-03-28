@@ -140,6 +140,9 @@ export function SettingsPage() {
   };
 
   const lastChecked = settings.lastCheckedAt || lastCheckedAt;
+  const discoveredUpdateLabel = updateInfo.newVersion
+    ? `phiên bản ${updateInfo.newVersion}`
+    : "một bản cập nhật mới";
   const statusLabel = error
     ? "Lỗi"
     : isUpdateReady
@@ -161,7 +164,7 @@ export function SettingsPage() {
       : isDownloading
         ? "Ứng dụng đang tải bản cập nhật ở nền."
         : updateInfo.hasUpdate
-          ? `Đã tìm thấy phiên bản ${updateInfo.newVersion}.`
+          ? `Đã tìm thấy ${discoveredUpdateLabel}.`
           : "Bạn đang dùng bản mới nhất.";
 
   return (
@@ -215,7 +218,7 @@ export function SettingsPage() {
                   <AlertTitle>Đã kiểm tra xong</AlertTitle>
                   <AlertDescription>
                     {updateInfo.hasUpdate
-                      ? `Đã tìm thấy phiên bản ${updateInfo.newVersion}.`
+                      ? `Đã tìm thấy ${discoveredUpdateLabel}.`
                       : "Ứng dụng đang ở phiên bản mới nhất."}
                   </AlertDescription>
                 </Alert>
