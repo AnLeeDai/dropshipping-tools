@@ -63,7 +63,9 @@ function WrapCell({ value, className }: { value: string; className?: string }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <div className={`whitespace-normal break-words leading-5 ${className ?? ""}`}>
+        <div
+          className={`whitespace-normal break-words leading-5 ${className ?? ""}`}
+        >
           {value || "-"}
         </div>
       </TooltipTrigger>
@@ -111,14 +113,16 @@ export default function EtsyResult({ data }: EtsyResultProps) {
             <Table className="w-full table-auto">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[110px]">Mã đơn</TableHead>
-                  <TableHead className="min-w-[180px]">Người nhận</TableHead>
-                  <TableHead className="min-w-[220px]">Sản phẩm</TableHead>
+                  <TableHead className="w-[110px]">Order ID</TableHead>
+                  <TableHead className="min-w-[180px]">Ship to</TableHead>
+                  <TableHead className="min-w-[220px]">Title</TableHead>
                   <TableHead className="w-[140px]">SKU</TableHead>
-                  <TableHead className="min-w-[220px]">Phân loại</TableHead>
-                  <TableHead className="min-w-[240px]">Cá nhân hóa</TableHead>
-                  <TableHead className="w-[70px] text-right">SL</TableHead>
-                  <TableHead className="w-[90px] text-right">Giá</TableHead>
+                  <TableHead className="min-w-[220px]">Variation</TableHead>
+                  <TableHead className="min-w-[240px]">
+                    Personalization
+                  </TableHead>
+                  <TableHead className="w-[70px] text-right">Qty</TableHead>
+                  <TableHead className="w-[90px] text-right">Price</TableHead>
                 </TableRow>
               </TableHeader>
 
@@ -131,7 +135,10 @@ export default function EtsyResult({ data }: EtsyResultProps) {
                   </TableRow>
                 ) : (
                   data.map((row, index) => (
-                    <TableRow key={`${row.orderId}-${index}`} className="align-top">
+                    <TableRow
+                      key={`${row.orderId}-${index}`}
+                      className="align-top"
+                    >
                       <TableCell className="max-w-[110px]">
                         <TruncateCell value={row.orderId} />
                       </TableCell>
@@ -150,7 +157,9 @@ export default function EtsyResult({ data }: EtsyResultProps) {
                       <TableCell className="max-w-[300px]">
                         <WrapCell value={row.personalization} />
                       </TableCell>
-                      <TableCell className="text-right align-middle">{row.quantity}</TableCell>
+                      <TableCell className="text-right align-middle">
+                        {row.quantity}
+                      </TableCell>
                       <TableCell className="text-right align-middle">
                         {row.unitPrice.toFixed(2)}
                       </TableCell>
