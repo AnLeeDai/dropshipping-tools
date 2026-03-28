@@ -1,6 +1,14 @@
-import { Copy } from "lucide-react";
+import { Copy, Database } from "lucide-react";
 import { toast } from "sonner";
-
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -9,20 +17,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-} from "@/components/ui/card";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { convertRowsToTabSeparated, copyToClipboard } from "@/lib/file-utils";
 
 export type ParsedEtsyRow = {
   orderId: string;
@@ -39,7 +40,7 @@ type EtsyResultProps = {
   data: ParsedEtsyRow[];
 };
 
-function EllipsisCell({
+function TruncateCell({
   value,
   className,
 }: {
@@ -51,7 +52,24 @@ function EllipsisCell({
       <TooltipTrigger asChild>
         <div className={`truncate ${className ?? ""}`}>{value || "-"}</div>
       </TooltipTrigger>
-      <TooltipContent className="max-w-xs wrap-break-word">
+      <TooltipContent className="max-w-sm whitespace-normal break-words">
+        <p>{value || "-"}</p>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function WrapCell({ value, className }: { value: string; className?: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div
+          className={`whitespace-normal break-words leading-5 ${className ?? ""}`}
+        >
+          {value || "-"}
+        </div>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-sm whitespace-normal break-words">
         <p>{value || "-"}</p>
       </TooltipContent>
     </Tooltip>
@@ -61,54 +79,50 @@ function EllipsisCell({
 export default function EtsyResult({ data }: EtsyResultProps) {
   const copyAll = async () => {
     try {
-      const rows = data.map((r) =>
-        [
-          r.orderId,
-          r.shipTo,
-          r.title,
-          r.sku,
-          r.variation,
-          r.personalization,
-          r.quantity,
-          r.unitPrice.toFixed(2),
-        ].join("\t"),
-      );
-
-      await navigator.clipboard.writeText(rows.join("\n"));
-      toast.success(`Đã copy ${data.length} dòng`);
+      const content = convertRowsToTabSeparated(data);
+      await copyToClipboard(content);
+      toast.success(`Đã sao chép ${data.length} dòng.`);
     } catch {
-      toast.error("Copy thất bại");
+      toast.error("Sao chép thất bại.");
     }
   };
 
   return (
     <TooltipProvider delayDuration={150}>
-      <Card className="w-full">
-        <CardHeader className="flex flex-row items-center justify-between gap-4 space-y-0">
-          <div>
-            <CardTitle>Kết quả parse Etsy</CardTitle>
-            <CardDescription>{data.length} dòng dữ liệu</CardDescription>
+      <Card className="overflow-hidden">
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 space-y-1">
+            <div className="flex items-center gap-2">
+              <Database className="h-4 w-4 text-muted-foreground" />
+              <CardTitle>Dữ liệu đã tách</CardTitle>
+              <Badge variant="outline">{data.length} dòng</Badge>
+            </div>
+            <CardDescription>
+              Kiểm tra lại trước khi dán sang spreadsheet hoặc công cụ khác.
+            </CardDescription>
           </div>
 
           <Button size="sm" onClick={copyAll}>
             <Copy className="mr-2 h-4 w-4" />
-            Copy
+            Sao chép
           </Button>
         </CardHeader>
 
         <CardContent>
           <div className="overflow-x-auto rounded-md border">
-            <Table className="table-fixed">
+            <Table className="w-full table-auto">
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-30">Order ID</TableHead>
-                  <TableHead className="w-65">Ship to</TableHead>
-                  <TableHead className="w-65">Title</TableHead>
-                  <TableHead className="w-35">SKU</TableHead>
-                  <TableHead className="w-45">Variation</TableHead>
-                  <TableHead className="w-55">Personalization</TableHead>
-                  <TableHead className="w-20 text-right">Qty</TableHead>
-                  <TableHead className="w-25 text-right">Price</TableHead>
+                  <TableHead className="w-[110px]">Order ID</TableHead>
+                  <TableHead className="min-w-[180px]">Ship to</TableHead>
+                  <TableHead className="min-w-[220px]">Title</TableHead>
+                  <TableHead className="w-[140px]">SKU</TableHead>
+                  <TableHead className="min-w-[220px]">Variation</TableHead>
+                  <TableHead className="min-w-[240px]">
+                    Personalization
+                  </TableHead>
+                  <TableHead className="w-[70px] text-right">Qty</TableHead>
+                  <TableHead className="w-[90px] text-right">Price</TableHead>
                 </TableRow>
               </TableHeader>
 
@@ -116,45 +130,38 @@ export default function EtsyResult({ data }: EtsyResultProps) {
                 {data.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={8} className="text-center">
-                      Không có dữ liệu
+                      Không có dữ liệu.
                     </TableCell>
                   </TableRow>
                 ) : (
-                  data.map((r, i) => (
+                  data.map((row, index) => (
                     <TableRow
-                      key={`${r.orderId}-${i}`}
-                      className={`transition-colors ${
-                        i % 2 === 0 ? "bg-muted/30" : ""
-                      } hover:bg-muted`}
+                      key={`${row.orderId}-${index}`}
+                      className="align-top"
                     >
-                      <TableCell>
-                        <EllipsisCell value={r.orderId} />
+                      <TableCell className="max-w-[110px]">
+                        <TruncateCell value={row.orderId} />
                       </TableCell>
-
-                      <TableCell>
-                        <EllipsisCell value={r.shipTo} />
+                      <TableCell className="max-w-[220px]">
+                        <WrapCell value={row.shipTo} />
                       </TableCell>
-
-                      <TableCell>
-                        <EllipsisCell value={r.title} />
+                      <TableCell className="max-w-[260px]">
+                        <WrapCell value={row.title} />
                       </TableCell>
-
-                      <TableCell>
-                        <EllipsisCell value={r.sku} />
+                      <TableCell className="max-w-[140px]">
+                        <TruncateCell value={row.sku} />
                       </TableCell>
-
-                      <TableCell>
-                        <EllipsisCell value={r.variation} />
+                      <TableCell className="max-w-[260px]">
+                        <WrapCell value={row.variation} />
                       </TableCell>
-
-                      <TableCell>
-                        <EllipsisCell value={r.personalization} />
+                      <TableCell className="max-w-[300px]">
+                        <WrapCell value={row.personalization} />
                       </TableCell>
-
-                      <TableCell className="text-right">{r.quantity}</TableCell>
-
-                      <TableCell className="text-right">
-                        {r.unitPrice.toFixed(2)}
+                      <TableCell className="text-right align-middle">
+                        {row.quantity}
+                      </TableCell>
+                      <TableCell className="text-right align-middle">
+                        {row.unitPrice.toFixed(2)}
                       </TableCell>
                     </TableRow>
                   ))

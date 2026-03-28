@@ -1,16 +1,23 @@
 {
   "name": "dropshipping-tools",
   "productName": "dropshipping-tools",
-  "version": "1.0.0",
-  "description": "My Electron application description",
+  "version": "0.0.2",
+  "description": "Desktop tools for dropshipping workflows",
   "main": ".vite/build/main.js",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AnLeeDai/dropshipping-tools.git"
+  },
+  "homepage": "https://github.com/AnLeeDai/dropshipping-tools",
   "scripts": {
     "start": "electron-forge start",
     "package": "electron-forge package",
     "make": "electron-forge make",
     "publish": "electron-forge publish",
-    "lint": "eslint --ext .ts,.tsx ."
+    "release:prepare": "node scripts/prepare-release.cjs",
+    "lint": "eslint --ext .ts,.tsx .",
+    "test": "node --experimental-strip-types --test tests/update-utils.test.mjs"
   },
   "keywords": [],
   "author": "TUF",
@@ -45,9 +52,11 @@
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.2.4",
+    "@radix-ui/react-switch": "^1.2.6",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "electron-squirrel-startup": "^1.0.1",
+    "electron-updater": "^6.8.3",
     "lucide-react": "^0.577.0",
     "next-themes": "^0.4.6",
     "pdfjs-dist": "^5.5.207",
