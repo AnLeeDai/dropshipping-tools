@@ -12,6 +12,12 @@ export interface ReleaseMetadata {
   releaseDate: string | null;
 }
 
+export interface UpdateDeferralInfo {
+  isDeferred: boolean;
+  deferredReason: string | null;
+  deferredUntil: string | null;
+}
+
 export function normalizeVersion(version: string): string {
   return version.trim().replace(/^v/i, "").trim();
 }
@@ -106,4 +112,47 @@ export function getKnownUpdateDetails(
 
 export function formatUpdateVersionLabel(version?: string): string {
   return version ? `phiên bản ${version}` : "một bản cập nhật mới";
+}
+
+export function getUpdateDeferralInfo(
+  availableAtMs: number | null,
+  nowMs = Date.now(),
+): UpdateDeferralInfo {
+  if (!availableAtMs || availableAtMs <= nowMs) {
+    return {
+      isDeferred: false,
+      deferredReason: null,
+      deferredUntil: null,
+    };
+  }
+
+  const remainingSeconds = Math.max(1, Math.ceil((availableAtMs - nowMs) / 1000));
+
+  return {
+    isDeferred: true,
+    deferredReason:
+      remainingSeconds <= 1
+        ? "Ứng dụng vừa được cài đặt. Vui lòng đợi khoảng 1 giây rồi kiểm tra lại cập nhật."
+        : `Ứng dụng vừa được cài đặt. Vui lòng đợi khoảng ${remainingSeconds} giây rồi kiểm tra lại cập nhật.`,
+    deferredUntil: new Date(availableAtMs).toISOString(),
+  };
+}
+
+export function formatUpdaterErrorMessage(rawMessage: string, repository?: string): string {
+  const message = rawMessage.trim();
+  const repoLabel = repository ? ` cho repo ${repository}` : "";
+
+  if (/404|not found/i.test(message)) {
+    return `Không tìm thấy feed cập nhật (404)${repoLabel}. Hãy kiểm tra GitHub Release đã publish công khai và có đủ file RELEASES, .nupkg, và Setup.exe.`;
+  }
+
+  if (/403|forbidden/i.test(message)) {
+    return `Máy chủ cập nhật từ chối truy cập${repoLabel}. Kiểm tra lại quyền truy cập repo hoặc giới hạn truy vấn của dịch vụ phát hành.`;
+  }
+
+  if (/timed out|timeout/i.test(message)) {
+    return "Kiểm tra cập nhật bị hết thời gian chờ. Hãy thử lại sau ít phút.";
+  }
+
+  return message;
 }

@@ -2,6 +2,8 @@ import { app, autoUpdater, BrowserWindow, ipcMain } from "electron";
 import { currentReleaseMetadata, releaseConfig } from "../config/release-config";
 import {
   compareVersions,
+  formatUpdaterErrorMessage,
+  getUpdateDeferralInfo,
   getKnownUpdateDetails,
   normalizeVersion,
   type ReleaseMetadata,
@@ -25,12 +27,16 @@ export interface UpdateState {
   canAutoUpdate: boolean;
   isDownloading: boolean;
   isUpdateReady: boolean;
+  isUpdateDeferred: boolean;
+  deferredReason: string | null;
+  deferredUntil: string | null;
   error: string | null;
   lastCheckedAt: string | null;
 }
 
 const RELEASE_LOOKUP_TIMEOUT_MS = 10000;
 const NATIVE_UPDATE_TIMEOUT_MS = 30000;
+const FIRST_RUN_UPDATE_DELAY_MS = 15000;
 
 let mainWindow: BrowserWindow | null = null;
 let scheduledCheck: NodeJS.Timeout | null = null;
@@ -41,6 +47,10 @@ let pendingNativeCheck: Promise<UpdateState> | null = null;
 let pendingNativeCheckResolve: ((state: UpdateState) => void) | null = null;
 let pendingNativeCheckReject: ((error: Error) => void) | null = null;
 let pendingNativeCheckTimeout: NodeJS.Timeout | null = null;
+let firstRunUpdateAvailableAt: number | null =
+  process.platform === "win32" && process.argv.includes("--squirrel-firstrun")
+    ? Date.now() + FIRST_RUN_UPDATE_DELAY_MS
+    : null;
 
 let updateState: UpdateState = {
   hasUpdate: false,
@@ -51,12 +61,30 @@ let updateState: UpdateState = {
   canAutoUpdate: false,
   isDownloading: false,
   isUpdateReady: false,
+  isUpdateDeferred: false,
+  deferredReason: null,
+  deferredUntil: null,
   error: null,
   lastCheckedAt: null,
 };
 
 function getCurrentVersion(): string {
   return normalizeVersion(app.getVersion());
+}
+
+function getRepositorySlug(): string {
+  const { owner, name } = releaseConfig.repository;
+  return `${owner}/${name}`;
+}
+
+function getDeferredUpdateState() {
+  const deferredState = getUpdateDeferralInfo(firstRunUpdateAvailableAt);
+
+  if (!deferredState.isDeferred) {
+    firstRunUpdateAvailableAt = null;
+  }
+
+  return deferredState;
 }
 
 function canUseNativeAutoUpdate(): boolean {
@@ -230,10 +258,6 @@ function ensureNativeCheckAvailable(): void {
   if (!canUseNativeAutoUpdate()) {
     throw new Error("Auto update is only available in packaged Windows and macOS builds.");
   }
-
-  if (process.platform === "win32" && process.argv.includes("--squirrel-firstrun")) {
-    throw new Error("Updates are unavailable during the first launch after install. Wait a few seconds and try again.");
-  }
 }
 
 function runNativeUpdateCheck(): Promise<UpdateState> {
@@ -282,6 +306,26 @@ async function refreshUpdateState(options?: {
 
   try {
     if (canUseNativeAutoUpdate()) {
+      const deferredState = getDeferredUpdateState();
+      if (deferredState.isDeferred) {
+        return updateSnapshot({
+          hasUpdate: false,
+          newVersion: undefined,
+          isDownloading: false,
+          isUpdateReady: false,
+          isUpdateDeferred: true,
+          deferredReason: deferredState.deferredReason,
+          deferredUntil: deferredState.deferredUntil,
+          error: null,
+        });
+      }
+
+      updateSnapshot({
+        isUpdateDeferred: false,
+        deferredReason: null,
+        deferredUntil: null,
+      });
+
       const nativeState = await runNativeUpdateCheck();
 
       if (nativeState.hasUpdate || nativeState.isUpdateReady) {
@@ -303,18 +347,25 @@ async function refreshUpdateState(options?: {
       releaseDate: releaseMetadata.releaseDate,
       isDownloading: false,
       isUpdateReady: false,
+      isUpdateDeferred: false,
+      deferredReason: null,
+      deferredUntil: null,
       error: null,
       lastCheckedAt: checkedAt,
     });
 
     return updateState;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown update error";
+    const rawMessage = error instanceof Error ? error.message : "Unknown update error";
+    const message = formatUpdaterErrorMessage(rawMessage, getRepositorySlug());
 
     updateSnapshot({
       error: message,
       lastCheckedAt: checkedAt,
       isDownloading: false,
+      isUpdateDeferred: false,
+      deferredReason: null,
+      deferredUntil: null,
     });
 
     if (emitErrors) {
@@ -346,6 +397,9 @@ function registerAutoUpdaterEvents(): void {
       releaseDate: details.releaseDate,
       isDownloading: true,
       isUpdateReady: false,
+      isUpdateDeferred: false,
+      deferredReason: null,
+      deferredUntil: null,
       error: null,
     });
 
@@ -365,6 +419,9 @@ function registerAutoUpdaterEvents(): void {
       releaseDate: currentReleaseMetadata.releaseDate,
       isDownloading: false,
       isUpdateReady: false,
+      isUpdateDeferred: false,
+      deferredReason: null,
+      deferredUntil: null,
       error: null,
     });
 
@@ -390,6 +447,9 @@ function registerAutoUpdaterEvents(): void {
       releaseDate: normalizeReleaseDate(releaseDate) || details.releaseDate || updateState.releaseDate || null,
       isDownloading: false,
       isUpdateReady: true,
+      isUpdateDeferred: false,
+      deferredReason: null,
+      deferredUntil: null,
       error: null,
     });
 
@@ -399,7 +459,14 @@ function registerAutoUpdaterEvents(): void {
   });
 
   autoUpdater.on("error", (error) => {
-    const message = error instanceof Error ? error.message : "Unknown update error";
+    const rawMessage = error instanceof Error ? error.message : "Unknown update error";
+    const message = formatUpdaterErrorMessage(rawMessage, getRepositorySlug());
+
+    console.error("Native auto-update failed", {
+      feedUrl: buildFeedUrl(),
+      repository: getRepositorySlug(),
+      rawMessage,
+    });
 
     updateSnapshot({
       error: message,
@@ -414,12 +481,16 @@ function registerAutoUpdaterEvents(): void {
 export function initializeUpdater(window: BrowserWindow): void {
   mainWindow = window;
   latestReleaseMetadata = currentReleaseMetadata;
+  const deferredState = getDeferredUpdateState();
 
   updateSnapshot({
     currentVersion: getCurrentVersion(),
     releaseName: currentReleaseMetadata.releaseName,
     releaseNotes: currentReleaseMetadata.releaseNotes,
     releaseDate: currentReleaseMetadata.releaseDate,
+    isUpdateDeferred: deferredState.isDeferred,
+    deferredReason: deferredState.deferredReason,
+    deferredUntil: deferredState.deferredUntil,
   });
 
   if (!canUseNativeAutoUpdate()) {
@@ -433,7 +504,9 @@ export function initializeUpdater(window: BrowserWindow): void {
 
   registerAutoUpdaterEvents();
 
-  const initialDelay = process.argv.includes("--squirrel-firstrun") ? 15000 : 5000;
+  const initialDelay = firstRunUpdateAvailableAt
+    ? Math.max(1000, firstRunUpdateAvailableAt - Date.now())
+    : 5000;
   setTimeout(() => {
     void refreshUpdateState({
       triggerBackgroundDownload: true,

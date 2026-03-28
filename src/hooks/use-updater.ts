@@ -9,6 +9,9 @@ interface UpdateInfo {
   releaseNotes?: string;
   releaseDate?: string | null;
   canAutoUpdate: boolean;
+  isUpdateDeferred: boolean;
+  deferredReason: string | null;
+  deferredUntil: string | null;
 }
 
 interface UpdaterSnapshot extends UpdateInfo {
@@ -24,6 +27,9 @@ interface UpdaterContextValue {
   isChecking: boolean;
   error: string | null;
   isUpdateReady: boolean;
+  isUpdateDeferred: boolean;
+  deferredReason: string | null;
+  deferredUntil: string | null;
   lastCheckedAt: string | null;
   checkForUpdates: () => Promise<UpdaterSnapshot>;
   quitAndInstall: () => Promise<void>;
@@ -55,6 +61,9 @@ const initialSnapshot: UpdaterSnapshot = {
   canAutoUpdate: false,
   isDownloading: false,
   isUpdateReady: false,
+  isUpdateDeferred: false,
+  deferredReason: null,
+  deferredUntil: null,
   error: null,
   lastCheckedAt: null,
 };
@@ -147,11 +156,17 @@ export function UpdaterProvider({ children }: { children: React.ReactNode }) {
       releaseNotes: snapshot.releaseNotes,
       releaseDate: snapshot.releaseDate,
       canAutoUpdate: snapshot.canAutoUpdate,
+      isUpdateDeferred: snapshot.isUpdateDeferred,
+      deferredReason: snapshot.deferredReason,
+      deferredUntil: snapshot.deferredUntil,
     },
     isDownloading: snapshot.isDownloading,
     isChecking,
     error: snapshot.error,
     isUpdateReady: snapshot.isUpdateReady,
+    isUpdateDeferred: snapshot.isUpdateDeferred,
+    deferredReason: snapshot.deferredReason,
+    deferredUntil: snapshot.deferredUntil,
     lastCheckedAt: snapshot.lastCheckedAt,
     checkForUpdates,
     quitAndInstall,

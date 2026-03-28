@@ -3,8 +3,10 @@ import assert from "node:assert/strict";
 import {
   compareVersions,
   createReleaseMetadata,
+  formatUpdaterErrorMessage,
   formatReleaseNotes,
   formatUpdateVersionLabel,
+  getUpdateDeferralInfo,
   getKnownUpdateDetails,
   hasNewerVersion,
   normalizeVersion,
@@ -65,4 +67,30 @@ test("format helpers keep fallback copy human readable", () => {
   assert.equal(formatReleaseNotes(["One", "Two"]), "• One\n• Two");
   assert.equal(formatUpdateVersionLabel("2.1.0"), "phiên bản 2.1.0");
   assert.equal(formatUpdateVersionLabel(), "một bản cập nhật mới");
+});
+
+test("getUpdateDeferralInfo returns a non-error wait state during first-run cooldown", () => {
+  const now = Date.UTC(2026, 2, 28, 10, 0, 0);
+  const deferred = getUpdateDeferralInfo(now + 4500, now);
+
+  assert.equal(deferred.isDeferred, true);
+  assert.match(deferred.deferredReason ?? "", /4|5/);
+  assert.equal(deferred.deferredUntil, new Date(now + 4500).toISOString());
+
+  assert.deepEqual(getUpdateDeferralInfo(now - 1, now), {
+    isDeferred: false,
+    deferredReason: null,
+    deferredUntil: null,
+  });
+});
+
+test("formatUpdaterErrorMessage compresses native 404 update failures into actionable text", () => {
+  const formatted = formatUpdaterErrorMessage(
+    "Command failed: 4294967295 System.AggregateException ... (404) Not Found ... Squirrel.Update.Program",
+    "AnLeeDai/dropshipping-tools",
+  );
+
+  assert.match(formatted, /Không tìm thấy feed cập nhật/);
+  assert.match(formatted, /AnLeeDai\/dropshipping-tools/);
+  assert.match(formatted, /RELEASES/);
 });

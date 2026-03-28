@@ -111,6 +111,8 @@ export function SettingsPage() {
     isDownloading,
     error,
     isUpdateReady,
+    isUpdateDeferred,
+    deferredReason,
     lastCheckedAt,
     checkForUpdates,
     quitAndInstall,
@@ -122,8 +124,10 @@ export function SettingsPage() {
   const handleCheckForUpdates = async () => {
     try {
       const result = await checkForUpdates();
-      setLastChecked();
-      setCheckStatus(result.error ? "error" : "success");
+      if (!result.isUpdateDeferred) {
+        setLastChecked();
+      }
+      setCheckStatus(result.error ? "error" : result.isUpdateDeferred ? "idle" : "success");
     } catch {
       setCheckStatus("error");
     }
@@ -145,6 +149,8 @@ export function SettingsPage() {
     : "một bản cập nhật mới";
   const statusLabel = error
     ? "Lỗi"
+    : isUpdateDeferred
+      ? "Tạm chờ"
     : isUpdateReady
       ? "Sẵn sàng"
       : isDownloading
@@ -154,11 +160,15 @@ export function SettingsPage() {
           : "Mới nhất";
   const statusVariant = error
     ? "destructive"
+    : isUpdateDeferred
+      ? "secondary"
     : updateInfo.hasUpdate || isDownloading || isUpdateReady
       ? "default"
       : "secondary";
   const statusDescription = error
     ? error
+    : isUpdateDeferred
+      ? deferredReason || "Ứng dụng sẽ sẵn sàng kiểm tra cập nhật sau ít giây nữa."
     : isUpdateReady
       ? "Bản cập nhật đã tải xong."
       : isDownloading
@@ -212,7 +222,15 @@ export function SettingsPage() {
                 </Alert>
               )}
 
-              {!error && checkStatus === "success" && (
+              {!error && isUpdateDeferred && (
+                <Alert>
+                  <Info className="h-4 w-4" />
+                  <AlertTitle>Đang chờ dịch vụ cập nhật sẵn sàng</AlertTitle>
+                  <AlertDescription>{deferredReason}</AlertDescription>
+                </Alert>
+              )}
+
+              {!error && !isUpdateDeferred && checkStatus === "success" && (
                 <Alert>
                   <CheckCircle2 className="h-4 w-4" />
                   <AlertTitle>Đã kiểm tra xong</AlertTitle>
@@ -240,11 +258,20 @@ export function SettingsPage() {
                     )}
                   </Button>
                 ) : (
-                  <Button onClick={handleCheckForUpdates} disabled={isChecking} className="sm:w-auto">
+                  <Button
+                    onClick={handleCheckForUpdates}
+                    disabled={isChecking || isUpdateDeferred}
+                    className="sm:w-auto"
+                  >
                     {isChecking ? (
                       <>
                         <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
                         Đang kiểm tra...
+                      </>
+                    ) : isUpdateDeferred ? (
+                      <>
+                        <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
+                        Vui lòng đợi...
                       </>
                     ) : (
                       <>
