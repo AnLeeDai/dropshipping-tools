@@ -50,16 +50,20 @@ internal sealed class TabSelectionChangedEventArgs : EventArgs
 
 internal sealed class ChromeTabStrip : Control
 {
-    private const int StripHeight = 44;
-    private const int TabOverlap = 30;
+    private const int StripHeight = 46;
+    private const int TabSpacing = 6;
     private const int MaxTabWidth = 220;
-    private const int MinTabWidth = 72;
+    private const int MinTabWidth = 96;
+    private const int InactiveTabTopOffset = 4;
+    private const int CloseButtonSize = 18;
+    private const int CloseButtonRightPadding = 10;
+    private const int TabHorizontalPadding = 16;
 
-    private static readonly Color StripBackgroundColor = Color.FromArgb(223, 227, 232);
+    private static readonly Color StripBackgroundColor = Color.FromArgb(229, 232, 236);
     private static readonly Color SelectedTabColor = Color.White;
-    private static readonly Color InactiveTabColor = Color.FromArgb(236, 239, 243);
-    private static readonly Color HoverTabColor = Color.FromArgb(245, 247, 249);
-    private static readonly Color BorderColor = Color.FromArgb(188, 193, 199);
+    private static readonly Color InactiveTabColor = Color.FromArgb(239, 242, 246);
+    private static readonly Color HoverTabColor = Color.FromArgb(247, 249, 251);
+    private static readonly Color BorderColor = Color.FromArgb(190, 196, 203);
     private static readonly Color SelectedTextColor = Color.FromArgb(32, 33, 36);
     private static readonly Color InactiveTextColor = Color.FromArgb(95, 99, 104);
     private static readonly Color CloseHoverColor = Color.FromArgb(36, 60, 64, 67);
@@ -77,7 +81,7 @@ internal sealed class ChromeTabStrip : Control
         Dock = DockStyle.Top;
         Height = StripHeight;
         MinimumSize = new Size(0, StripHeight);
-        Padding = new Padding(12, 7, 12, 0);
+        Padding = new Padding(12, 6, 12, 0);
         BackColor = StripBackgroundColor;
         DoubleBuffered = true;
         SetStyle(
@@ -161,7 +165,7 @@ internal sealed class ChromeTabStrip : Control
             return;
         }
 
-        var tabWidth = GetTabWidth();
+        var tabWidths = GetTabWidths(e.Graphics);
         var tabHeight = Height - Padding.Top - 1;
         var x = Padding.Left;
         var orderedTabs = _tabs
@@ -171,11 +175,12 @@ internal sealed class ChromeTabStrip : Control
             .Cast<AppTabPage>()
             .ToArray();
 
-        foreach (var tabPage in _tabs)
+        for (var index = 0; index < _tabs.Count; index++)
         {
-            var bounds = new Rectangle(x, Padding.Top, tabWidth, tabHeight);
+            var tabPage = _tabs[index];
+            var bounds = new Rectangle(x, Padding.Top, tabWidths[index], tabHeight);
             _tabBounds[tabPage] = bounds;
-            x += tabWidth - TabOverlap;
+            x += tabWidths[index] + TabSpacing;
         }
 
         foreach (var tabPage in orderedTabs)
@@ -246,12 +251,15 @@ internal sealed class ChromeTabStrip : Control
     {
         var isSelected = ReferenceEquals(tabPage, _selectedTab);
         var isHovered = ReferenceEquals(tabPage, _hoveredTab);
+        var drawBounds = isSelected
+            ? bounds
+            : Rectangle.FromLTRB(bounds.Left, bounds.Top + InactiveTabTopOffset, bounds.Right, bounds.Bottom);
         var fillColor = isSelected
             ? SelectedTabColor
             : isHovered ? HoverTabColor : InactiveTabColor;
         var textColor = isSelected ? SelectedTextColor : InactiveTextColor;
 
-        using var path = CreateTabPath(bounds);
+        using var path = CreateTabPath(drawBounds);
         using var fillBrush = new SolidBrush(fillColor);
         using var borderPen = new Pen(BorderColor);
         graphics.FillPath(fillBrush, path);
@@ -260,20 +268,20 @@ internal sealed class ChromeTabStrip : Control
         if (isSelected)
         {
             using var blendPen = new Pen(fillColor, 2f);
-            graphics.DrawLine(blendPen, bounds.Left + 14, separatorY, bounds.Right - 14, separatorY);
+            graphics.DrawLine(blendPen, drawBounds.Left + 1, separatorY, drawBounds.Right - 1, separatorY);
         }
 
         var textBounds = Rectangle.FromLTRB(
-            bounds.Left + 18,
-            bounds.Top + 6,
-            bounds.Right - 18,
-            bounds.Bottom - 8);
+            drawBounds.Left + TabHorizontalPadding,
+            drawBounds.Top + 2,
+            drawBounds.Right - TabHorizontalPadding,
+            drawBounds.Bottom - 4);
 
         if (tabPage.IsClosable)
         {
-            var closeBounds = GetCloseButtonBounds(bounds);
+            var closeBounds = GetCloseButtonBounds(drawBounds);
             _closeBounds[tabPage] = closeBounds;
-            textBounds = Rectangle.FromLTRB(textBounds.Left, textBounds.Top, closeBounds.Left - 6, textBounds.Bottom);
+            textBounds = Rectangle.FromLTRB(textBounds.Left, textBounds.Top, closeBounds.Left - 8, textBounds.Bottom);
             DrawCloseGlyph(graphics, closeBounds, ReferenceEquals(tabPage, _hoveredCloseTab), textColor);
         }
 
@@ -312,7 +320,14 @@ internal sealed class ChromeTabStrip : Control
 
     private AppTabPage? HitTestTab(Point location)
     {
-        foreach (var tabPage in _tabs)
+        var orderedTabs = _tabs
+            .Where(tabPage => !ReferenceEquals(tabPage, _selectedTab))
+            .Append(_selectedTab)
+            .Where(static tabPage => tabPage is not null)
+            .Cast<AppTabPage>()
+            .Reverse();
+
+        foreach (var tabPage in orderedTabs)
         {
             if (_tabBounds.TryGetValue(tabPage, out var bounds) && bounds.Contains(location))
             {
@@ -323,37 +338,68 @@ internal sealed class ChromeTabStrip : Control
         return null;
     }
 
-    private int GetTabWidth()
+    private int[] GetTabWidths(Graphics graphics)
     {
         var availableWidth = Math.Max(0, ClientSize.Width - Padding.Left - Padding.Right);
         if (availableWidth == 0)
         {
-            return MaxTabWidth;
+            return Enumerable.Repeat(MaxTabWidth, _tabs.Count).ToArray();
         }
 
-        var rawWidth = (availableWidth + (Math.Max(0, _tabs.Count - 1) * TabOverlap)) / Math.Max(1, _tabs.Count);
-        return Math.Clamp(rawWidth, MinTabWidth, MaxTabWidth);
+        var idealWidths = _tabs
+            .Select(tabPage => GetIdealTabWidth(graphics, tabPage))
+            .ToArray();
+        var requiredWidth = idealWidths.Sum() + (Math.Max(0, _tabs.Count - 1) * TabSpacing);
+
+        if (requiredWidth <= availableWidth)
+        {
+            return idealWidths;
+        }
+
+        var rawWidth = (availableWidth - (Math.Max(0, _tabs.Count - 1) * TabSpacing)) / Math.Max(1, _tabs.Count);
+        var uniformWidth = Math.Clamp(rawWidth, MinTabWidth, MaxTabWidth);
+        return Enumerable.Repeat(uniformWidth, _tabs.Count).ToArray();
+    }
+
+    private int GetIdealTabWidth(Graphics graphics, AppTabPage tabPage)
+    {
+        var flags = TextFormatFlags.SingleLine | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix;
+        var textSize = TextRenderer.MeasureText(
+            graphics,
+            tabPage.Title,
+            Font,
+            new Size(int.MaxValue, StripHeight),
+            flags);
+
+        var closeWidth = tabPage.IsClosable
+            ? CloseButtonSize + CloseButtonRightPadding + 6
+            : 0;
+        var width = textSize.Width + (TabHorizontalPadding * 2) + closeWidth;
+        return Math.Clamp(width, MinTabWidth, MaxTabWidth);
     }
 
     private static Rectangle GetCloseButtonBounds(Rectangle tabBounds)
     {
         return new Rectangle(
-            x: tabBounds.Right - 28,
-            y: tabBounds.Top + (tabBounds.Height - 16) / 2,
-            width: 16,
-            height: 16);
+            x: tabBounds.Right - CloseButtonSize - CloseButtonRightPadding,
+            y: tabBounds.Top + (tabBounds.Height - CloseButtonSize) / 2,
+            width: CloseButtonSize,
+            height: CloseButtonSize);
     }
 
     private static GraphicsPath CreateTabPath(Rectangle bounds)
     {
+        const int radius = 10;
+        const int diameter = radius * 2;
         var path = new GraphicsPath();
 
         path.StartFigure();
-        path.AddLine(bounds.Left + 15, bounds.Bottom, bounds.Left + 7, bounds.Top + 12);
-        path.AddArc(bounds.Left + 6, bounds.Top + 1, 16, 16, 180, 85);
-        path.AddLine(bounds.Left + 14, bounds.Top + 1, bounds.Right - 14, bounds.Top + 1);
-        path.AddArc(bounds.Right - 22, bounds.Top + 1, 16, 16, 275, 85);
-        path.AddLine(bounds.Right - 7, bounds.Top + 12, bounds.Right - 15, bounds.Bottom);
+        path.AddLine(bounds.Left, bounds.Bottom, bounds.Left, bounds.Top + radius);
+        path.AddArc(bounds.Left, bounds.Top, diameter, diameter, 180, 90);
+        path.AddLine(bounds.Left + radius, bounds.Top, bounds.Right - radius, bounds.Top);
+        path.AddArc(bounds.Right - diameter, bounds.Top, diameter, diameter, 270, 90);
+        path.AddLine(bounds.Right, bounds.Top + radius, bounds.Right, bounds.Bottom);
+        path.AddLine(bounds.Right, bounds.Bottom, bounds.Left, bounds.Bottom);
         path.CloseFigure();
 
         return path;
