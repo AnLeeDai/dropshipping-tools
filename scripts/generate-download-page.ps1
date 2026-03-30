@@ -34,18 +34,27 @@ if ([string]::IsNullOrWhiteSpace($feedPath)) {
     throw "Missing site.updateFeedPath in $releaseConfigPath"
 }
 
-$setupFile = Get-ChildItem -LiteralPath $releaseDirectory -Filter *Setup.exe -File | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
-if ($null -eq $setupFile) {
-    throw "No setup executable was found in $releaseDirectory"
+$installerFile = Get-ChildItem -LiteralPath $releaseDirectory -Filter *Installer.exe -File |
+    Sort-Object LastWriteTimeUtc -Descending |
+    Select-Object -First 1
+
+if ($null -eq $installerFile) {
+    $installerFile = Get-ChildItem -LiteralPath $releaseDirectory -Filter *Setup.exe -File |
+        Sort-Object LastWriteTimeUtc -Descending |
+        Select-Object -First 1
 }
 
-$downloadPath = "./$($feedPath.Trim('/'))/$($setupFile.Name)"
+if ($null -eq $installerFile) {
+    throw "No installer executable was found in $releaseDirectory"
+}
+
+$downloadPath = "./$($feedPath.Trim('/'))/$($installerFile.Name)"
 $escapedDownloadPath = Escape-Html $downloadPath
 $escapedVersion = Escape-Html $version
 
 $lines = @(
     '<!DOCTYPE html>',
-    '<html lang="vi">',
+    '<html lang="en">',
     '  <head>',
     '    <meta charset="UTF-8" />',
     '    <meta name="viewport" content="width=device-width, initial-scale=1.0" />',
@@ -110,8 +119,8 @@ $lines = @(
     '  <body>',
     '    <main>',
     '      <h1>Dropshipping Tools</h1>',
-    '      <p>Install once with setup. Future updates happen inside the app.</p>',
-    "      <a class=`"button`" href=`"$escapedDownloadPath`">Download setup</a>",
+    '      <p>Choose an install folder once. Future updates happen inside the app.</p>',
+    "      <a class=`"button`" href=`"$escapedDownloadPath`">Download installer</a>",
     "      <div class=`"meta`">Version $escapedVersion</div>",
     '    </main>',
     '  </body>',
@@ -127,4 +136,4 @@ if (Test-Path -LiteralPath $siteOutputDirectory) {
 New-Item -ItemType Directory -Path $siteOutputDirectory -Force | Out-Null
 $html | Set-Content -LiteralPath (Join-Path $siteOutputDirectory "index.html") -Encoding utf8
 
-Write-Output "Download page created for $($setupFile.Name)"
+Write-Output "Download page created for $($installerFile.Name)"

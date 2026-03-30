@@ -71,7 +71,7 @@ internal sealed class UpdateService
         var manager = CreateUpdateManager();
         if (!manager.IsInstalled)
         {
-            throw new InvalidOperationException("Ứng dụng hiện không chạy từ bản cài đặt. Hãy cài bằng setup để dùng cập nhật tự động.");
+            throw new InvalidOperationException("Ứng dụng hiện không chạy từ bản cài đặt. Hãy cài bằng bộ cài một lần để dùng cập nhật tự động.");
         }
 
         var pendingUpdate = update.PendingAsset ?? manager.UpdatePendingRestart;

@@ -1,7 +1,9 @@
 .vs/
+artifacts/
 bin/
 obj/
 out/
+.tools/
 node_modules/
 _legacy_node_modules_locked/
 .release-notes.md

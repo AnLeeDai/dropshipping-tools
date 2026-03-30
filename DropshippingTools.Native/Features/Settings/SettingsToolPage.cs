@@ -80,7 +80,7 @@ internal sealed class SettingsToolPage : UserControl, IHostedToolView
         {
             AutoSize = true,
             MaximumSize = new Size(720, 0),
-            Text = "Cài bằng setup một lần. Các bản sau chỉ cần bấm cập nhật để tải, cài và mở lại ứng dụng.",
+            Text = "Cài bằng bộ cài một lần. Lần đầu có thể chọn thư mục cài đặt. Các bản sau chỉ cần bấm cập nhật để tải, cài và mở lại ứng dụng.",
             Margin = new Padding(0, 0, 0, 18),
         };
 
@@ -184,7 +184,7 @@ internal sealed class SettingsToolPage : UserControl, IHostedToolView
                 {
                     MessageBox.Show(
                         FindForm(),
-                        "Bản hiện tại không chạy từ setup. Hãy cài bằng file setup một lần để các lần sau chỉ cần bấm cập nhật trong app.",
+                        "Bản hiện tại không chạy từ bộ cài. Hãy cài bằng bộ cài một lần để các lần sau chỉ cần bấm cập nhật trong app.",
                         AppInfo.ProductName,
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Information);
@@ -273,7 +273,7 @@ internal sealed class SettingsToolPage : UserControl, IHostedToolView
         {
             MessageBox.Show(
                 FindForm(),
-                "Bản hiện tại không chạy từ setup. Hãy cài bằng file setup một lần để dùng cập nhật một chạm trong app.",
+                "Bản hiện tại không chạy từ bộ cài. Hãy cài bằng bộ cài một lần để dùng cập nhật một chạm trong app.",
                 AppInfo.ProductName,
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
@@ -359,7 +359,7 @@ internal sealed class SettingsToolPage : UserControl, IHostedToolView
         if (!result.IsInstalled)
         {
             _updateStatusValueLabel.Text = "Chưa chạy từ bản cài đặt.";
-            _updateHintValueLabel.Text = "Hãy cài bằng setup một lần. Sau đó mỗi lần có bản mới chỉ cần bấm cập nhật trong app.";
+            _updateHintValueLabel.Text = "Hãy cài bằng bộ cài một lần. Khi cài có thể chọn thư mục lưu, và các lần sau chỉ cần bấm cập nhật trong app.";
             return;
         }
 
@@ -410,7 +410,7 @@ internal sealed class SettingsToolPage : UserControl, IHostedToolView
 
         if (_lastUpdateCheck is { IsInstalled: false })
         {
-            return "Cài bằng setup";
+            return "Cài bằng bộ cài";
         }
 
         if (_lastUpdateCheck?.IsUpdateReadyToRestart == true)

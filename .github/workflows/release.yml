@@ -8,6 +8,7 @@ on:
       - ".github/workflows/release.yml"
       - "DropshippingTools.Native/**"
       - "DropshippingTools.Native.sln"
+      - "installer/**"
       - "release.config.json"
       - "scripts/build-velopack-release.ps1"
       - "scripts/generate-download-page.ps1"
@@ -43,8 +44,14 @@ jobs:
       - name: Build
         run: dotnet build DropshippingTools.Native.sln --configuration Release --no-restore
 
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
       - name: Build Velopack release
         shell: pwsh
+        env:
+          VELOPACK_SIGN_PARAMS: ${{ secrets.VELOPACK_SIGN_PARAMS }}
         run: ./scripts/build-velopack-release.ps1 -Configuration Release -Runtime win-x64
 
       - name: Generate download page
