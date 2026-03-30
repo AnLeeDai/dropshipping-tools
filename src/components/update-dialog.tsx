@@ -40,7 +40,7 @@ function formatReleaseDate(date: string | null | undefined) {
 export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
   const { updateInfo, isDownloading, error, isUpdateReady, quitAndInstall } = useUpdater();
   const [isOpen, setIsOpen] = React.useState(open ?? updateInfo.hasUpdate);
-  const [isInstalling, setIsInstalling] = React.useState(false);
+  const [isRestarting, setIsRestarting] = React.useState(false);
 
   React.useEffect(() => {
     if (open !== undefined) {
@@ -56,13 +56,13 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
     onOpenChange?.(nextOpen);
   };
 
-  const handleInstall = async () => {
+  const handleRestartToUpdate = async () => {
     try {
-      setIsInstalling(true);
+      setIsRestarting(true);
       await quitAndInstall();
-    } catch (installError) {
-      console.error("Failed to install update:", installError);
-      setIsInstalling(false);
+    } catch (restartError) {
+      console.error("Failed to restart for update:", restartError);
+      setIsRestarting(false);
     }
   };
 
@@ -70,7 +70,7 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
     return null;
   }
 
-  const statusLabel = isUpdateReady ? "Sẵn sàng cài" : isDownloading ? "Đang tải" : "Có bản mới";
+  const statusLabel = isUpdateReady ? "Sẵn sàng khởi động lại" : isDownloading ? "Đang tải" : "Có bản mới";
 
   return (
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
@@ -117,7 +117,18 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
               <Download className="h-4 w-4" />
               <AlertTitle>Đang tải bản cập nhật</AlertTitle>
               <AlertDescription>
-                Ứng dụng đang tải bản mới ở nền. Khi tải xong bạn có thể cài đặt ngay.
+                Ứng dụng đang tải bản mới ở nền. Khi tải xong, bạn chỉ cần khởi động lại ứng dụng để dùng
+                phiên bản mới.
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {isUpdateReady && (
+            <Alert>
+              <CheckCircle2 className="h-4 w-4" />
+              <AlertTitle>Sẵn sàng sau khi khởi động lại</AlertTitle>
+              <AlertDescription>
+                Bản cập nhật đã tải xong. Bạn không cần cài đặt thủ công, chỉ cần khởi động lại ứng dụng.
               </AlertDescription>
             </Alert>
           )}
@@ -152,9 +163,9 @@ export function UpdateDialog({ open, onOpenChange }: UpdateDialogProps) {
           </Button>
 
           {isUpdateReady ? (
-            <Button type="button" onClick={handleInstall} disabled={isInstalling}>
+            <Button type="button" onClick={handleRestartToUpdate} disabled={isRestarting}>
               <CheckCircle2 className="mr-2 h-4 w-4" />
-              {isInstalling ? "Đang cài đặt..." : "Cài đặt"}
+              {isRestarting ? "Đang khởi động lại..." : "Khởi động lại ngay"}
             </Button>
           ) : (
             <Button type="button" disabled>

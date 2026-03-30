@@ -502,7 +502,8 @@ export function initializeUpdater(window: BrowserWindow): void {
   }
 
   autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.autoRunAppAfterInstall = true;
 
   registerAutoUpdaterEvents();
 
@@ -539,7 +540,7 @@ export function setupUpdateHandlers(): void {
     }
 
     setImmediate(() => {
-      autoUpdater.quitAndInstall();
+      autoUpdater.quitAndInstall(true, true);
     });
 
     return { success: true };

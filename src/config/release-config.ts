@@ -13,6 +13,7 @@ export interface ReleaseConfig {
   };
   autoUpdate: {
     checkIntervalMinutes: number;
+    feedUrl?: string;
   };
   release: {
     version: string;

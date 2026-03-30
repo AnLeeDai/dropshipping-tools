@@ -4,7 +4,8 @@
     "name": "dropshipping-tools"
   },
   "autoUpdate": {
-    "checkIntervalMinutes": 60
+    "checkIntervalMinutes": 60,
+    "feedUrl": "https://anleedai.github.io/dropshipping-tools/updates/win/x64"
   },
   "release": {
     "version": "0.0.2",

@@ -94,3 +94,14 @@ test("formatUpdaterErrorMessage compresses native 404 update failures into actio
   assert.match(formatted, /AnLeeDai\/dropshipping-tools/);
   assert.match(formatted, /latest\.yml/);
 });
+
+test("formatUpdaterErrorMessage converts network failures into a clear retry message", () => {
+  const formatted = formatUpdaterErrorMessage(
+    "Error: fetch failed because net::ERR_INTERNET_DISCONNECTED",
+    "AnLeeDai/dropshipping-tools",
+  );
+
+  assert.match(formatted, /Không thể kết nối tới máy chủ cập nhật/);
+  assert.match(formatted, /AnLeeDai\/dropshipping-tools/);
+  assert.match(formatted, /nguồn cập nhật/i);
+});

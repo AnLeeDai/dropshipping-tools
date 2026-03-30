@@ -142,12 +142,24 @@ export function formatUpdaterErrorMessage(rawMessage: string, repository?: strin
   const message = rawMessage.trim();
   const repoLabel = repository ? ` cho repo ${repository}` : "";
 
+  if (
+    /fetch failed|failed to fetch|network ?error|socket hang up/i.test(message) ||
+    /\bEAI_AGAIN\b|\bENETUNREACH\b|\bENOTFOUND\b|\bECONNABORTED\b|\bECONNREFUSED\b|\bECONNRESET\b/i.test(
+      message,
+    ) ||
+    /ERR_(?:ADDRESS_UNREACHABLE|CONNECTION_ABORTED|CONNECTION_CLOSED|CONNECTION_REFUSED|CONNECTION_RESET|CONNECTION_TIMED_OUT|INTERNET_DISCONNECTED|NAME_NOT_RESOLVED|NETWORK_CHANGED)/i.test(
+      message,
+    )
+  ) {
+    return `Không thể kết nối tới máy chủ cập nhật${repoLabel}. Có thể mạng đang bị ngắt hoặc nguồn cập nhật hiện không truy cập được. Hãy kiểm tra kết nối Internet rồi thử lại.`;
+  }
+
   if (/404|not found/i.test(message)) {
-    return `Không tìm thấy feed cập nhật (404)${repoLabel}. Hãy kiểm tra GitHub Release đã publish công khai và có đủ file latest.yml, .blockmap, và Setup.exe.`;
+    return `Không tìm thấy feed cập nhật (404)${repoLabel}. Hãy kiểm tra nguồn cập nhật đã có đủ file latest.yml, .blockmap và Setup.exe.`;
   }
 
   if (/403|forbidden/i.test(message)) {
-    return `Máy chủ cập nhật từ chối truy cập${repoLabel}. Kiểm tra lại quyền truy cập repo hoặc giới hạn truy vấn của dịch vụ phát hành.`;
+    return `Máy chủ cập nhật từ chối truy cập${repoLabel}. Kiểm tra lại quyền truy cập hoặc cấu hình nguồn phát hành.`;
   }
 
   if (/timed out|timeout/i.test(message)) {

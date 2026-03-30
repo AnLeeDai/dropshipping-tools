@@ -119,7 +119,7 @@ export function SettingsPage() {
   } = useUpdater();
   const { settings, toggleAutoNotify, setLastChecked } = useUpdateSettings();
   const [checkStatus, setCheckStatus] = React.useState<"idle" | "success" | "error">("idle");
-  const [isInstalling, setIsInstalling] = React.useState(false);
+  const [isRestarting, setIsRestarting] = React.useState(false);
 
   const handleCheckForUpdates = async () => {
     try {
@@ -133,13 +133,13 @@ export function SettingsPage() {
     }
   };
 
-  const handleInstallUpdate = async () => {
+  const handleRestartToUpdate = async () => {
     try {
-      setIsInstalling(true);
+      setIsRestarting(true);
       await quitAndInstall();
-    } catch (installError) {
-      console.error("Failed to install update:", installError);
-      setIsInstalling(false);
+    } catch (restartError) {
+      console.error("Failed to restart for update:", restartError);
+      setIsRestarting(false);
     }
   };
 
@@ -152,7 +152,7 @@ export function SettingsPage() {
     : isUpdateDeferred
       ? "Tạm chờ"
     : isUpdateReady
-      ? "Sẵn sàng"
+      ? "Sẵn sàng khởi động lại"
       : isDownloading
         ? "Đang tải"
         : updateInfo.hasUpdate
@@ -170,7 +170,7 @@ export function SettingsPage() {
     : isUpdateDeferred
       ? deferredReason || "Ứng dụng sẽ sẵn sàng kiểm tra cập nhật sau ít giây nữa."
     : isUpdateReady
-      ? "Bản cập nhật đã tải xong."
+      ? "Bản cập nhật đã tải xong. Chỉ cần khởi động lại ứng dụng để dùng phiên bản mới."
       : isDownloading
         ? "Ứng dụng đang tải bản cập nhật ở nền."
         : updateInfo.hasUpdate
@@ -242,18 +242,28 @@ export function SettingsPage() {
                 </Alert>
               )}
 
+              {!error && isUpdateReady && (
+                <Alert>
+                  <CheckCircle2 className="h-4 w-4" />
+                  <AlertTitle>Bản cập nhật đã sẵn sàng</AlertTitle>
+                  <AlertDescription>
+                    Bản cập nhật đã tải xong. Bạn không cần cài đặt thủ công, chỉ cần khởi động lại ứng dụng.
+                  </AlertDescription>
+                </Alert>
+              )}
+
               <div className="flex flex-col gap-3 sm:flex-row">
                 {isUpdateReady ? (
-                  <Button onClick={handleInstallUpdate} disabled={isInstalling} className="sm:w-auto">
-                    {isInstalling ? (
+                  <Button onClick={handleRestartToUpdate} disabled={isRestarting} className="sm:w-auto">
+                    {isRestarting ? (
                       <>
                         <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />
-                        Đang cài đặt...
+                        Đang khởi động lại...
                       </>
                     ) : (
                       <>
                         <CheckCircle2 className="mr-2 h-4 w-4" />
-                        Cài đặt
+                        Khởi động lại ngay
                       </>
                     )}
                   </Button>
@@ -387,7 +397,7 @@ export function SettingsPage() {
                     <p className="text-sm font-medium">Cập nhật tự động</p>
                     <p className="text-sm text-muted-foreground">
                       {updateInfo.canAutoUpdate
-                        ? "Bản cài đặt có thể nhận bản mới tự động."
+                        ? "Bản cài đặt có thể tự tải update và áp dụng sau khi khởi động lại."
                         : "Bạn đang ở môi trường dev hoặc bản build chưa phát hành."}
                     </p>
                   </div>
@@ -408,7 +418,7 @@ export function SettingsPage() {
             <CardContent className="space-y-1">
               <DetailRow label="Tên ứng dụng" value="Dropshipping Tools" />
               <DetailRow label="Tác giả" value="An Lee Dai" />
-              <DetailRow label="Nguồn cập nhật" value="GitHub Releases" isLast />
+              <DetailRow label="Nguồn cập nhật" value="GitHub Pages + GitHub Releases" isLast />
             </CardContent>
           </Card>
         </div>

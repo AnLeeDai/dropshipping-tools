@@ -6,6 +6,14 @@ function createAppId(owner, name) {
   return `com.${normalizedOwner}.${normalizedName}`;
 }
 
+function createDefaultFeedUrl(owner, name) {
+  return `https://${owner.toLowerCase()}.github.io/${name}/updates/win/x64`;
+}
+
+const updateFeedUrl =
+  releaseConfig.autoUpdate?.feedUrl ||
+  createDefaultFeedUrl(releaseConfig.repository.owner, releaseConfig.repository.name);
+
 module.exports = {
   appId: createAppId(releaseConfig.repository.owner, releaseConfig.repository.name),
   directories: {
@@ -13,9 +21,8 @@ module.exports = {
   },
   publish: [
     {
-      provider: "github",
-      owner: releaseConfig.repository.owner,
-      repo: releaseConfig.repository.name,
+      provider: "generic",
+      url: updateFeedUrl,
     },
   ],
   win: {
