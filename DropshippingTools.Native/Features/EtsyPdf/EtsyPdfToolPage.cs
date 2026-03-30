@@ -124,14 +124,15 @@ internal sealed class EtsyPdfToolPage : UserControl
             HideSelection = false,
             AllowDrop = true,
         };
-        _queueListView.Columns.Add("Tệp", 360);
-        _queueListView.Columns.Add("Kích thước", 100);
-        _queueListView.Columns.Add("Trạng thái", 120);
-        _queueListView.Columns.Add("Dòng", 70);
-        _queueListView.Columns.Add("Thông báo", 460);
+        _queueListView.Columns.Add("Tệp");
+        _queueListView.Columns.Add("Kích thước");
+        _queueListView.Columns.Add("Trạng thái");
+        _queueListView.Columns.Add("Dòng");
+        _queueListView.Columns.Add("Thông báo");
         _queueListView.DragEnter += HandlePdfDragEnter;
         _queueListView.DragDrop += HandlePdfDragDrop;
         _queueListView.SelectedIndexChanged += (_, _) => RefreshPageState();
+        _queueListView.Resize += (_, _) => ResizeQueueColumns();
 
         queueLayout.Controls.Add(queueLabel, 0, 0);
         queueLayout.Controls.Add(_queueListView, 0, 1);
@@ -164,19 +165,20 @@ internal sealed class EtsyPdfToolPage : UserControl
             MultiSelect = true,
             SelectionMode = DataGridViewSelectionMode.FullRowSelect,
             AutoGenerateColumns = false,
+            AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
             RowHeadersVisible = false,
             DataSource = _resultsBindingSource,
         };
 
-        _resultsGrid.Columns.Add(CreateTextColumn("OrderId", "Order ID", 120));
-        _resultsGrid.Columns.Add(CreateTextColumn("ShipTo", "Ship To", 240));
-        _resultsGrid.Columns.Add(CreateTextColumn("Title", "Title", 220));
-        _resultsGrid.Columns.Add(CreateTextColumn("Sku", "SKU", 120));
-        _resultsGrid.Columns.Add(CreateTextColumn("Variation", "Variation", 180));
-        _resultsGrid.Columns.Add(CreateTextColumn("Personalization", "Personalization", 220));
+        _resultsGrid.Columns.Add(CreateTextColumn("OrderId", "Order ID", 90));
+        _resultsGrid.Columns.Add(CreateTextColumn("ShipTo", "Ship To", 180));
+        _resultsGrid.Columns.Add(CreateTextColumn("Title", "Title", 180));
+        _resultsGrid.Columns.Add(CreateTextColumn("Sku", "SKU", 90));
+        _resultsGrid.Columns.Add(CreateTextColumn("Variation", "Variation", 130));
+        _resultsGrid.Columns.Add(CreateTextColumn("Personalization", "Personalization", 160));
         _resultsGrid.Columns.Add(CreateTextColumn("Quantity", "Qty", 60));
 
-        var priceColumn = CreateTextColumn("UnitPrice", "Unit Price", 90);
+        var priceColumn = CreateTextColumn("UnitPrice", "Unit Price", 70);
         priceColumn.DefaultCellStyle.Format = "0.00";
         _resultsGrid.Columns.Add(priceColumn);
 
@@ -189,6 +191,7 @@ internal sealed class EtsyPdfToolPage : UserControl
         layout.Controls.Add(splitContainer, 0, 2);
 
         Controls.Add(layout);
+        ResizeQueueColumns();
     }
 
     private void HandleAddPdfFiles(object? sender, EventArgs e)
@@ -406,6 +409,7 @@ internal sealed class EtsyPdfToolPage : UserControl
             _queueListView.EndUpdate();
         }
 
+        ResizeQueueColumns();
         RefreshPageState();
     }
 
@@ -518,13 +522,40 @@ internal sealed class EtsyPdfToolPage : UserControl
         return button;
     }
 
-    private static DataGridViewTextBoxColumn CreateTextColumn(string propertyName, string headerText, int width)
+    private void ResizeQueueColumns()
+    {
+        if (_queueListView.Columns.Count != 5)
+        {
+            return;
+        }
+
+        var availableWidth = _queueListView.ClientSize.Width - SystemInformation.VerticalScrollBarWidth;
+        if (availableWidth <= 0)
+        {
+            return;
+        }
+
+        var fileWidth = (int)Math.Round(availableWidth * 0.30);
+        var sizeWidth = (int)Math.Round(availableWidth * 0.12);
+        var statusWidth = (int)Math.Round(availableWidth * 0.14);
+        var rowCountWidth = (int)Math.Round(availableWidth * 0.08);
+        var messageWidth = Math.Max(120, availableWidth - fileWidth - sizeWidth - statusWidth - rowCountWidth);
+
+        _queueListView.Columns[0].Width = fileWidth;
+        _queueListView.Columns[1].Width = sizeWidth;
+        _queueListView.Columns[2].Width = statusWidth;
+        _queueListView.Columns[3].Width = rowCountWidth;
+        _queueListView.Columns[4].Width = messageWidth;
+    }
+
+    private static DataGridViewTextBoxColumn CreateTextColumn(string propertyName, string headerText, int fillWeight)
     {
         return new DataGridViewTextBoxColumn
         {
             DataPropertyName = propertyName,
             HeaderText = headerText,
-            Width = width,
+            AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+            FillWeight = fillWeight,
             SortMode = DataGridViewColumnSortMode.NotSortable,
         };
     }

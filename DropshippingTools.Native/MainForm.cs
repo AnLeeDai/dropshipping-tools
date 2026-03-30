@@ -5,12 +5,20 @@ namespace DropshippingTools.Native;
 
 internal sealed class MainForm : Form
 {
+    private const string HomeToolId = "home";
+
     private readonly IReadOnlyList<IAppToolModule> _modules;
     private readonly IReadOnlyList<AppToolDescriptor> _toolDescriptors;
-    private readonly Dictionary<string, TabPage> _tabsById;
-    private readonly List<Control> _hostedViews = [];
+    private readonly Dictionary<string, IAppToolModule> _modulesById;
+    private readonly Dictionary<string, Control> _viewsById;
+    private readonly Dictionary<string, AppTabPage> _tabsById;
 
-    private readonly TabControl _tabs = new BufferedTabControl { Dock = DockStyle.Fill };
+    private readonly ChromeTabStrip _tabs = new();
+    private readonly Panel _contentHost = new()
+    {
+        Dock = DockStyle.Fill,
+        BackColor = SystemColors.Window,
+    };
     private readonly StatusStrip _statusStrip = new();
     private readonly ToolStripStatusLabel _statusLabel = new() { Text = "Sẵn sàng" };
     private readonly ToolStripProgressBar _statusProgressBar = new()
@@ -32,8 +40,10 @@ internal sealed class MainForm : Form
 
         _modules = modules;
         _toolDescriptors = modules.Select(static module => module.Descriptor).ToList().AsReadOnly();
-        _tabsById = new Dictionary<string, TabPage>(StringComparer.OrdinalIgnoreCase);
         EnsureUniqueToolIds(_toolDescriptors);
+        _modulesById = modules.ToDictionary(module => module.Descriptor.Id, StringComparer.OrdinalIgnoreCase);
+        _viewsById = new Dictionary<string, Control>(StringComparer.OrdinalIgnoreCase);
+        _tabsById = new Dictionary<string, AppTabPage>(StringComparer.OrdinalIgnoreCase);
 
         _toolHostContext = new ToolHostContext(
             getTools: () => _toolDescriptors,
@@ -46,33 +56,43 @@ internal sealed class MainForm : Form
         Text = $"{AppInfo.ProductName} {AppInfo.CurrentVersionLabel}";
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(1100, 720);
-        Size = new Size(1280, 820);
+        WindowState = FormWindowState.Maximized;
+        BackColor = SystemColors.ControlLight;
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
         UpdateStyles();
 
+        _tabs.TabCloseRequested += HandleTabCloseRequested;
+        _tabs.SelectedTabChanged += HandleSelectedTabChanged;
+
         SuspendLayout();
+        InitializeViews();
         InitializeTabs();
         InitializeStatusStrip();
         ResumeLayout(performLayout: true);
-
         Shown += HandleFormShownAsync;
+    }
+
+    private void InitializeViews()
+    {
+        foreach (var module in _modules)
+        {
+            var view = module.CreateView(_toolHostContext)
+                ?? throw new InvalidOperationException($"Công cụ '{module.Descriptor.Id}' đã trả về giao diện rỗng.");
+
+            view.Dock = DockStyle.Fill;
+            _viewsById.Add(module.Descriptor.Id, view);
+        }
     }
 
     private void InitializeTabs()
     {
-        foreach (var module in _modules)
-        {
-            var view = module.CreateView(_toolHostContext) ?? throw new InvalidOperationException($"Công cụ '{module.Descriptor.Id}' đã trả về giao diện rỗng.");
-            view.Dock = DockStyle.Fill;
-            _hostedViews.Add(view);
-
-            var tabPage = new TabPage(module.Descriptor.DisplayName);
-            tabPage.Controls.Add(view);
-            _tabs.TabPages.Add(tabPage);
-            _tabsById.Add(module.Descriptor.Id, tabPage);
-        }
-
+        Controls.Add(_contentHost);
         Controls.Add(_tabs);
+
+        if (!OpenToolTab(HomeToolId, selectTab: true))
+        {
+            throw new InvalidOperationException("Không thể khởi tạo tab Trang chủ.");
+        }
     }
 
     private void InitializeStatusStrip()
@@ -85,7 +105,7 @@ internal sealed class MainForm : Form
 
     private async void HandleFormShownAsync(object? sender, EventArgs e)
     {
-        foreach (var view in _hostedViews.OfType<IHostedToolView>())
+        foreach (var view in _viewsById.Values.OfType<IHostedToolView>())
         {
             await view.OnHostShownAsync();
         }
@@ -93,10 +113,106 @@ internal sealed class MainForm : Form
 
     private void NavigateTo(string toolId)
     {
-        if (_tabsById.TryGetValue(toolId, out var tabPage))
+        if (!OpenToolTab(toolId, selectTab: true))
+        {
+            SetStatus($"Không tìm thấy công cụ '{toolId}'.");
+        }
+    }
+
+    private bool OpenToolTab(string toolId, bool selectTab)
+    {
+        if (_tabsById.TryGetValue(toolId, out var existingTab))
+        {
+            if (selectTab)
+            {
+                _tabs.SelectedTab = existingTab;
+            }
+
+            return true;
+        }
+
+        if (!_modulesById.TryGetValue(toolId, out var module) || !_viewsById.TryGetValue(toolId, out var view))
+        {
+            return false;
+        }
+
+        var tabPage = new AppTabPage(
+            toolId: module.Descriptor.Id,
+            title: module.Descriptor.DisplayName,
+            isClosable: !string.Equals(toolId, HomeToolId, StringComparison.OrdinalIgnoreCase),
+            view: view);
+
+        if (view.Parent is not null)
+        {
+            view.Parent.Controls.Remove(view);
+        }
+
+        _tabs.AddTab(tabPage);
+        _tabsById.Add(toolId, tabPage);
+
+        if (selectTab)
         {
             _tabs.SelectedTab = tabPage;
         }
+
+        return true;
+    }
+
+    private void HandleTabCloseRequested(object? sender, TabCloseRequestedEventArgs e)
+    {
+        if (!e.TabPage.IsClosable)
+        {
+            return;
+        }
+
+        CloseToolTab(e.TabPage.ToolId);
+    }
+
+    private void HandleSelectedTabChanged(object? sender, TabSelectionChangedEventArgs e)
+    {
+        ShowTabView(e.SelectedTab);
+    }
+
+    private void CloseToolTab(string toolId)
+    {
+        if (!_tabsById.TryGetValue(toolId, out var tabPage))
+        {
+            return;
+        }
+
+        if (ReferenceEquals(_contentHost.Controls.Count > 0 ? _contentHost.Controls[0] : null, tabPage.View))
+        {
+            _contentHost.Controls.Remove(tabPage.View);
+        }
+
+        _tabsById.Remove(toolId);
+        _tabs.RemoveTab(tabPage);
+
+        if (_tabs.SelectedTab is null && _tabsById.TryGetValue(HomeToolId, out var homeTab))
+        {
+            _tabs.SelectedTab = homeTab;
+        }
+    }
+
+    private void ShowTabView(AppTabPage? tabPage)
+    {
+        if (_contentHost.Controls.Count > 0)
+        {
+            _contentHost.Controls.RemoveAt(0);
+        }
+
+        if (tabPage is null)
+        {
+            return;
+        }
+
+        if (tabPage.View.Parent is not null)
+        {
+            tabPage.View.Parent.Controls.Remove(tabPage.View);
+        }
+
+        _contentHost.Controls.Add(tabPage.View);
+        tabPage.View.Dock = DockStyle.Fill;
     }
 
     private void SetStatus(string message)
