@@ -20,12 +20,12 @@ internal sealed class UpdateService
         var metadata = await response.Content.ReadFromJsonAsync<ReleaseMetadata>(cancellationToken: cancellationToken);
         if (metadata is null)
         {
-            throw new InvalidOperationException("Update metadata is empty.");
+            throw new InvalidOperationException("Dữ liệu metadata cập nhật đang rỗng.");
         }
 
         if (string.IsNullOrWhiteSpace(metadata.DownloadUrl))
         {
-            throw new InvalidOperationException("Update metadata is missing downloadUrl.");
+            throw new InvalidOperationException("Metadata cập nhật đang thiếu downloadUrl.");
         }
 
         var currentVersion = AppInfo.CurrentVersionLabel;

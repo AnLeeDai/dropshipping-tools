@@ -7,21 +7,21 @@ $releaseConfigPath = Join-Path $projectRoot "release.config.json"
 $projectFilePath = Join-Path $projectRoot "DropshippingTools.Native\DropshippingTools.Native.csproj"
 
 if (-not (Test-Path -LiteralPath $publishDirectory)) {
-    throw "Publish directory does not exist: $publishDirectory"
+    throw "Thư mục xuất bản không tồn tại: $publishDirectory"
 }
 
 [xml]$projectXml = Get-Content -LiteralPath $projectFilePath
 $version = [string]($projectXml.Project.PropertyGroup.Version | Select-Object -First 1)
 
 if ([string]::IsNullOrWhiteSpace($version)) {
-    throw "Version is missing in $projectFilePath"
+    throw "Thiếu phiên bản trong $projectFilePath"
 }
 
 $releaseConfig = Get-Content -LiteralPath $releaseConfigPath -Raw | ConvertFrom-Json
 $exe = Get-ChildItem -LiteralPath $publishDirectory -Filter *.exe -File | Select-Object -First 1
 
 if ($null -eq $exe) {
-    throw "No .exe file was found in $publishDirectory"
+    throw "Không tìm thấy tệp .exe nào trong $publishDirectory"
 }
 
 if (Test-Path -LiteralPath $stagingDirectory) {
@@ -42,6 +42,6 @@ $releaseMetadata = [ordered]@{
 
 $releaseMetadata | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $stagingDirectory "release.json") -Encoding utf8
 
-Write-Output "Staged update feed:"
+Write-Output "Đã chuẩn bị nguồn cấp cập nhật:"
 Write-Output "- $($exe.Name)"
 Write-Output "- release.json"

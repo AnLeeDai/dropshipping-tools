@@ -8,7 +8,7 @@ internal static class FriendlyErrorFormatter
         {
             if (httpException.StatusCode.HasValue)
             {
-                return $"Khong the tai du lieu cap nhat. May chu tra ve ma loi {(int)httpException.StatusCode.Value}.";
+                return $"Không thể tải dữ liệu cập nhật. Máy chủ trả về mã lỗi {(int)httpException.StatusCode.Value}.";
             }
 
             var message = httpException.Message;
@@ -16,30 +16,30 @@ internal static class FriendlyErrorFormatter
                 message.Contains("Name or service not known", StringComparison.OrdinalIgnoreCase) ||
                 message.Contains("remote name could not be resolved", StringComparison.OrdinalIgnoreCase))
             {
-                return "Khong tim thay may chu cap nhat. Hay kiem tra ket noi mang va URL feed.";
+                return "Không tìm thấy máy chủ cập nhật. Hãy kiểm tra kết nối mạng và URL nguồn cấp.";
             }
 
             if (message.Contains("actively refused", StringComparison.OrdinalIgnoreCase) ||
                 message.Contains("forcibly closed", StringComparison.OrdinalIgnoreCase))
             {
-                return "Ket noi toi may chu cap nhat bi tu choi hoac bi ngat giua chung.";
+                return "Kết nối tới máy chủ cập nhật bị từ chối hoặc bị ngắt giữa chừng.";
             }
 
-            return "Khong the ket noi toi may chu cap nhat. Hay kiem tra mang roi thu lai.";
+            return "Không thể kết nối tới máy chủ cập nhật. Hãy kiểm tra mạng rồi thử lại.";
         }
 
         if (exception is TaskCanceledException)
         {
-            return "Yeu cau cap nhat bi het thoi gian. Hay kiem tra mang roi thu lai.";
+            return "Yêu cầu cập nhật bị hết thời gian. Hãy kiểm tra mạng rồi thử lại.";
         }
 
         if (exception is IOException)
         {
-            return "Khong the doc hoac ghi tep can thiet. Hay dong cac tep dang bi khoa va thu lai.";
+            return "Không thể đọc hoặc ghi tệp cần thiết. Hãy đóng các tệp đang bị khóa và thử lại.";
         }
 
         return string.IsNullOrWhiteSpace(exception.Message)
-            ? "Da xay ra loi khong xac dinh."
+            ? "Đã xảy ra lỗi không xác định."
             : exception.Message;
     }
 }

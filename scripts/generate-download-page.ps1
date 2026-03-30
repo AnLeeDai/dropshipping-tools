@@ -17,21 +17,21 @@ $updateFeedDirectory = Join-Path $projectRoot "out\update-feed"
 $siteOutputDirectory = Join-Path $projectRoot "out\pages-site"
 
 if (-not (Test-Path -LiteralPath $updateFeedDirectory)) {
-    throw "Update feed directory does not exist: $updateFeedDirectory"
+    throw "Thư mục nguồn cấp cập nhật không tồn tại: $updateFeedDirectory"
 }
 
 [xml]$projectXml = Get-Content -LiteralPath $projectFilePath
 $version = [string]($projectXml.Project.PropertyGroup.Version | Select-Object -First 1)
 
 if ([string]::IsNullOrWhiteSpace($version)) {
-    throw "Version is missing in $projectFilePath"
+    throw "Thiếu phiên bản trong $projectFilePath"
 }
 
 $releaseConfig = Get-Content -LiteralPath $releaseConfigPath -Raw | ConvertFrom-Json
 $exe = Get-ChildItem -LiteralPath $updateFeedDirectory -Filter *.exe -File | Select-Object -First 1
 
 if ($null -eq $exe) {
-    throw "No .exe file was found in $updateFeedDirectory"
+    throw "Không tìm thấy tệp .exe nào trong $updateFeedDirectory"
 }
 
 $feedPath = [string]$releaseConfig.site.updateFeedPath
@@ -40,11 +40,11 @@ $releaseNotesHtml = @($releaseConfig.release.notes | ForEach-Object { "         
 
 $html = @"
 <!DOCTYPE html>
-<html lang="en">
+<html lang="vi">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Dropshipping Tools Download</title>
+    <title>Tải xuống Bộ công cụ Dropshipping</title>
     <style>
       :root {
         --bg: #f5f5f5;
@@ -161,32 +161,32 @@ $html = @"
   <body>
     <main>
       <section class="hero">
-        <h1>Dropshipping Tools</h1>
-        <p class="lead">Download the latest Windows .exe build from this page. The app can check release.json and replace itself on restart when a new version is available.</p>
+        <h1>Bộ công cụ Dropshipping</h1>
+        <p class="lead">Tải bản Windows .exe mới nhất.</p>
         <div class="cta">
-          <a class="button" href="$(Escape-Html $downloadPath)">Download .exe</a>
+          <a class="button" href="$(Escape-Html $downloadPath)">Tải tệp .exe</a>
         </div>
       </section>
 
       <section class="meta">
         <div class="meta-grid">
           <div class="card">
-            <div class="label">Version</div>
+            <div class="label">Phiên bản</div>
             <div class="value">$(Escape-Html $version)</div>
           </div>
           <div class="card">
-            <div class="label">Release</div>
+            <div class="label">Bản phát hành</div>
             <div class="value">$(Escape-Html ([string]$releaseConfig.release.name))</div>
           </div>
           <div class="card">
-            <div class="label">Published</div>
+            <div class="label">Ngày phát hành</div>
             <div class="value">$(Escape-Html ([string]$releaseConfig.release.publishedAt))</div>
           </div>
         </div>
       </section>
 
       <section class="notes">
-        <h2>Release Notes</h2>
+        <h2>Ghi chú phát hành</h2>
         <ul>
 $releaseNotesHtml
         </ul>
@@ -203,4 +203,4 @@ if (Test-Path -LiteralPath $siteOutputDirectory) {
 New-Item -ItemType Directory -Path $siteOutputDirectory -Force | Out-Null
 $html | Set-Content -LiteralPath (Join-Path $siteOutputDirectory "index.html") -Encoding utf8
 
-Write-Output "Generated download page for $($exe.Name)"
+Write-Output "Đã tạo trang tải xuống cho $($exe.Name)"

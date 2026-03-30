@@ -4,13 +4,12 @@
     "updateFeedPath": "updates/win/x64"
   },
   "release": {
-    "name": "Ban native Windows dau tien",
+    "name": "Bản phát hành 0.0.4",
     "publishedAt": "2026-03-30",
     "notes": [
-      "Chuyen toan bo ung dung tu Electron sang C# WinForms va chi dung control mac dinh cua Windows.",
-      "Port chuc nang xu ly PDF don Etsy, queue nhieu file, drag-drop va copy bang ket qua sang clipboard.",
-      "Phat hanh bang mot file .exe duy nhat tren GitHub Pages va cung cap release metadata qua release.json.",
-      "Ban moi co the duoc tai truc tiep trong app va chi can khoi dong lai de ap dung cap nhat."
+      "Thêm công cụ xử lý PDF Etsy.",
+      "Hỗ trợ hàng chờ nhiều tệp và sao chép kết quả.",
+      "Cập nhật cấu trúc ứng dụng theo mô hình nhiều công cụ."
     ]
   }
 }
