@@ -1,4 +1,3 @@
-using System.Globalization;
 using DropshippingTools.Native.Formatting;
 using DropshippingTools.Native.Models;
 using DropshippingTools.Native.Services;
@@ -15,18 +14,14 @@ internal sealed class SettingsToolPage : UserControl, IHostedToolView
     private AppSettings _settings;
     private UpdateCheckResult? _lastUpdateCheck;
     private bool _isCheckingUpdates;
-    private bool _isDownloadingUpdate;
+    private bool _isApplyingUpdate;
     private bool _startupHandled;
 
     private CheckBox _autoNotifyCheckBox = null!;
     private Label _currentVersionValueLabel = null!;
-    private Label _latestVersionValueLabel = null!;
-    private Label _releaseDateValueLabel = null!;
-    private Label _lastCheckedValueLabel = null!;
     private Label _updateStatusValueLabel = null!;
-    private Button _checkUpdatesButton = null!;
-    private Button _downloadUpdateButton = null!;
-    private RichTextBox _releaseNotesBox = null!;
+    private Label _updateHintValueLabel = null!;
+    private Button _updateButton = null!;
 
     public SettingsToolPage(ToolHostContext context, SettingsService settingsService, UpdateService updateService)
     {
@@ -56,102 +51,96 @@ internal sealed class SettingsToolPage : UserControl, IHostedToolView
         }
     }
 
-    private bool IsBusy => _isCheckingUpdates || _isDownloadingUpdate;
-    private bool HasPendingUpdate => _lastUpdateCheck is { HasUpdate: true };
+    private bool IsBusy => _isCheckingUpdates || _isApplyingUpdate;
+    private bool HasActionableUpdate => _lastUpdateCheck is { IsInstalled: true, HasUpdate: true };
 
     private void InitializeLayout()
     {
         var layout = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            Padding = new Padding(16),
+            Padding = new Padding(24),
             ColumnCount = 1,
-            RowCount = 5,
+            RowCount = 3,
+            AutoScroll = true,
         };
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
+        var titleLabel = new Label
+        {
+            AutoSize = true,
+            Text = "Cập nhật ứng dụng",
+            Font = new Font(Font, FontStyle.Bold),
+            Margin = new Padding(0, 0, 0, 10),
+        };
+
         var descriptionLabel = new Label
         {
             AutoSize = true,
-            MaximumSize = new Size(980, 0),
-            Text = "Kiểm tra cập nhật và tải phiên bản mới khi cần.",
-            Margin = new Padding(0, 0, 0, 12),
+            MaximumSize = new Size(720, 0),
+            Text = "Cài bằng setup một lần. Các bản sau chỉ cần bấm cập nhật để tải, cài và mở lại ứng dụng.",
+            Margin = new Padding(0, 0, 0, 18),
         };
 
-        var detailsTable = new TableLayoutPanel
+        var card = new TableLayoutPanel
         {
             AutoSize = true,
-            ColumnCount = 2,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Padding = new Padding(18),
+            Margin = new Padding(0),
+            ColumnCount = 1,
             RowCount = 6,
-            Margin = new Padding(0, 0, 0, 12),
+            BorderStyle = BorderStyle.FixedSingle,
+            MaximumSize = new Size(500, 0),
         };
-        detailsTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
-        detailsTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        card.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        card.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        card.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        card.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        card.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        card.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-        _currentVersionValueLabel = CreateValueLabel();
-        _latestVersionValueLabel = CreateValueLabel();
-        _releaseDateValueLabel = CreateValueLabel();
-        _lastCheckedValueLabel = CreateValueLabel();
-        _updateStatusValueLabel = CreateValueLabel();
-        var updateSourceValueLabel = CreateValueLabel();
-        updateSourceValueLabel.Text = AppInfo.UpdateMetadataUrl;
-
-        AddInfoRow(detailsTable, 0, "Phiên bản hiện tại", _currentVersionValueLabel);
-        AddInfoRow(detailsTable, 1, "Phiên bản mới nhất", _latestVersionValueLabel);
-        AddInfoRow(detailsTable, 2, "Ngày phát hành", _releaseDateValueLabel);
-        AddInfoRow(detailsTable, 3, "Lần kiểm tra gần nhất", _lastCheckedValueLabel);
-        AddInfoRow(detailsTable, 4, "Trạng thái cập nhật", _updateStatusValueLabel);
-        AddInfoRow(detailsTable, 5, "Nguồn cập nhật", updateSourceValueLabel);
-
-        var actionsPanel = new FlowLayoutPanel
+        var cardTitleLabel = new Label
         {
             AutoSize = true,
-            WrapContents = true,
-            FlowDirection = FlowDirection.LeftToRight,
-            Margin = new Padding(0, 0, 0, 12),
+            Text = "Tự động cập nhật",
+            Font = new Font(Font, FontStyle.Bold),
+            Margin = new Padding(0, 0, 0, 10),
         };
+
+        _currentVersionValueLabel = CreateBodyLabel();
+        _currentVersionValueLabel.Margin = new Padding(0, 0, 0, 8);
+
+        _updateStatusValueLabel = CreateBodyLabel(FontStyle.Bold);
+        _updateStatusValueLabel.Margin = new Padding(0, 0, 0, 8);
+
+        _updateHintValueLabel = CreateBodyLabel();
+        _updateHintValueLabel.MaximumSize = new Size(430, 0);
+        _updateHintValueLabel.Margin = new Padding(0, 0, 0, 14);
+
+        _updateButton = CreateActionButton("Kiểm tra và cập nhật", HandleUpdateAsync);
+        _updateButton.Margin = new Padding(0, 0, 0, 12);
 
         _autoNotifyCheckBox = new CheckBox
         {
             AutoSize = true,
-            Text = "Hiển thị thông báo cập nhật khi khởi động",
-            Margin = new Padding(0, 6, 18, 0),
+            Text = "Thông báo khi có bản mới lúc mở ứng dụng",
+            Margin = new Padding(0),
         };
         _autoNotifyCheckBox.CheckedChanged += HandleAutoNotifyChanged;
 
-        _checkUpdatesButton = CreateActionButton("Kiểm tra cập nhật", HandleCheckForUpdatesAsync);
-        _downloadUpdateButton = CreateActionButton("Tải xuống và khởi động lại", HandleDownloadUpdateAsync);
+        card.Controls.Add(cardTitleLabel, 0, 0);
+        card.Controls.Add(_currentVersionValueLabel, 0, 1);
+        card.Controls.Add(_updateStatusValueLabel, 0, 2);
+        card.Controls.Add(_updateHintValueLabel, 0, 3);
+        card.Controls.Add(_updateButton, 0, 4);
+        card.Controls.Add(_autoNotifyCheckBox, 0, 5);
 
-        actionsPanel.Controls.Add(_autoNotifyCheckBox);
-        actionsPanel.Controls.Add(_checkUpdatesButton);
-        actionsPanel.Controls.Add(_downloadUpdateButton);
-
-        var notesLabel = new Label
-        {
-            AutoSize = true,
-            Text = "Ghi chú phát hành",
-            Font = new Font(Font, FontStyle.Bold),
-            Margin = new Padding(0, 0, 0, 8),
-        };
-
-        _releaseNotesBox = new RichTextBox
-        {
-            Dock = DockStyle.Fill,
-            ReadOnly = true,
-            DetectUrls = true,
-            BackColor = SystemColors.Window,
-            BorderStyle = BorderStyle.FixedSingle,
-        };
-
-        layout.Controls.Add(descriptionLabel, 0, 0);
-        layout.Controls.Add(detailsTable, 0, 1);
-        layout.Controls.Add(actionsPanel, 0, 2);
-        layout.Controls.Add(notesLabel, 0, 3);
-        layout.Controls.Add(_releaseNotesBox, 0, 4);
+        layout.Controls.Add(titleLabel, 0, 0);
+        layout.Controls.Add(descriptionLabel, 0, 1);
+        layout.Controls.Add(card, 0, 2);
 
         Controls.Add(layout);
     }
@@ -162,14 +151,9 @@ internal sealed class SettingsToolPage : UserControl, IHostedToolView
         SaveSettings();
     }
 
-    private async void HandleCheckForUpdatesAsync(object? sender, EventArgs e)
+    private async void HandleUpdateAsync(object? sender, EventArgs e)
     {
-        await CheckForUpdatesAsync(showDialogs: true);
-    }
-
-    private async void HandleDownloadUpdateAsync(object? sender, EventArgs e)
-    {
-        await DownloadUpdateAsync();
+        await StartUpdateFlowAsync();
     }
 
     private async Task CheckForUpdatesAsync(bool showDialogs, bool notifyWhenUpdateAvailable = false)
@@ -192,28 +176,61 @@ internal sealed class SettingsToolPage : UserControl, IHostedToolView
             SaveSettings();
             ApplyUpdateSummary(result);
 
+            if (!result.IsInstalled)
+            {
+                _context.SetStatus("Bản hiện tại chưa hỗ trợ cập nhật tự động.");
+
+                if (showDialogs)
+                {
+                    MessageBox.Show(
+                        FindForm(),
+                        "Bản hiện tại không chạy từ setup. Hãy cài bằng file setup một lần để các lần sau chỉ cần bấm cập nhật trong app.",
+                        AppInfo.ProductName,
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                }
+
+                return;
+            }
+
+            if (result.IsUpdateReadyToRestart)
+            {
+                _context.SetStatus($"Bản {result.AvailableVersion} đã sẵn sàng để áp dụng.");
+
+                if (showDialogs)
+                {
+                    MessageBox.Show(
+                        FindForm(),
+                        $"Bản {result.AvailableVersion} đã tải xong. Nhấn cập nhật để khởi động lại và áp dụng bản mới.",
+                        AppInfo.ProductName,
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                }
+
+                return;
+            }
+
             if (result.HasUpdate)
             {
-                _context.SetStatus($"Đã có bản cập nhật {result.Metadata.Version}.");
+                _context.SetStatus($"Đã có bản cập nhật {result.AvailableVersion}.");
 
                 if (showDialogs || notifyWhenUpdateAvailable)
                 {
                     MessageBox.Show(
                         FindForm(),
-                        $"Đã tìm thấy bản mới {result.Metadata.Version}. Nhấn Tải xuống và khởi động lại để tải tệp .exe mới và khởi động lại ứng dụng.",
+                        $"Đã tìm thấy bản mới {result.AvailableVersion}. Nhấn cập nhật để tải về và khởi động lại ứng dụng.",
                         AppInfo.ProductName,
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Information);
                 }
-            }
-            else
-            {
-                _context.SetStatus("Bạn đang dùng phiên bản mới nhất.");
 
-                if (showDialogs)
-                {
-                    MessageBox.Show(FindForm(), "Bạn đang dùng phiên bản mới nhất.", AppInfo.ProductName, MessageBoxButtons.OK, MessageBoxIcon.Information);
-                }
+                return;
+            }
+
+            _context.SetStatus("Bạn đang dùng phiên bản mới nhất.");
+            if (showDialogs)
+            {
+                MessageBox.Show(FindForm(), "Bạn đang dùng phiên bản mới nhất.", AppInfo.ProductName, MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
         }
         catch (Exception ex)
@@ -235,27 +252,47 @@ internal sealed class SettingsToolPage : UserControl, IHostedToolView
         }
     }
 
-    private async Task DownloadUpdateAsync()
+    private async Task StartUpdateFlowAsync()
     {
-        if (_isDownloadingUpdate)
+        if (_isApplyingUpdate)
         {
             return;
         }
 
-        if (_lastUpdateCheck is null)
+        if (_lastUpdateCheck is null || (!_lastUpdateCheck.HasUpdate && _lastUpdateCheck.IsInstalled))
         {
             await CheckForUpdatesAsync(showDialogs: false);
         }
 
-        if (!HasPendingUpdate)
+        if (_lastUpdateCheck is null)
         {
-            MessageBox.Show(FindForm(), "Chưa có bản cập nhật mới để tải xuống.", AppInfo.ProductName, MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
 
+        if (!_lastUpdateCheck.IsInstalled)
+        {
+            MessageBox.Show(
+                FindForm(),
+                "Bản hiện tại không chạy từ setup. Hãy cài bằng file setup một lần để dùng cập nhật một chạm trong app.",
+                AppInfo.ProductName,
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            return;
+        }
+
+        if (!HasActionableUpdate)
+        {
+            MessageBox.Show(FindForm(), "Bạn đang dùng phiên bản mới nhất.", AppInfo.ProductName, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var confirmationMessage = _lastUpdateCheck.IsUpdateReadyToRestart
+            ? $"Bản {_lastUpdateCheck.AvailableVersion} đã tải xong. Khởi động lại để áp dụng ngay?"
+            : $"Ứng dụng sẽ tải bản {_lastUpdateCheck.AvailableVersion}, tự thay bản cũ và khởi động lại sau khi xong. Tiếp tục?";
+
         var confirmation = MessageBox.Show(
             FindForm(),
-            $"Ứng dụng sẽ tải bản {_lastUpdateCheck!.Metadata.Version}, thay tệp .exe hiện tại và khởi động lại ngay sau khi tải xong. Tiếp tục?",
+            confirmationMessage,
             AppInfo.ProductName,
             MessageBoxButtons.YesNo,
             MessageBoxIcon.Question);
@@ -265,10 +302,19 @@ internal sealed class SettingsToolPage : UserControl, IHostedToolView
             return;
         }
 
-        _isDownloadingUpdate = true;
+        _isApplyingUpdate = true;
         RefreshPageState();
-        _context.ShowProgress(maximum: 100, value: 0, style: ProgressBarStyle.Continuous);
-        _context.SetStatus("Đang tải bản cập nhật...");
+
+        if (_lastUpdateCheck.IsUpdateReadyToRestart)
+        {
+            _context.ShowProgress(style: ProgressBarStyle.Marquee);
+            _context.SetStatus("Đang áp dụng bản cập nhật...");
+        }
+        else
+        {
+            _context.ShowProgress(maximum: 100, value: 0, style: ProgressBarStyle.Continuous);
+            _context.SetStatus("Đang tải bản cập nhật...");
+        }
 
         try
         {
@@ -278,25 +324,18 @@ internal sealed class SettingsToolPage : UserControl, IHostedToolView
                 _context.SetStatus($"Đang tải bản cập nhật... {percent}%");
             });
 
-            await _updateService.DownloadAndReplaceAsync(_lastUpdateCheck!, progress);
-
-            MessageBox.Show(
-                FindForm(),
-                "Đã tải xong bản cập nhật mới. Ứng dụng sẽ đóng để thay tệp .exe và mở lại phiên bản mới.",
-                AppInfo.ProductName,
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
-
-            FindForm()?.Close();
+            await _updateService.DownloadAndApplyAsync(_lastUpdateCheck, progress);
         }
         catch (Exception ex)
         {
-            MessageBox.Show(FindForm(), FriendlyErrorFormatter.Format(ex), AppInfo.ProductName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            _context.SetStatus("Tải bản cập nhật thất bại.");
+            var friendlyError = FriendlyErrorFormatter.Format(ex);
+            MessageBox.Show(FindForm(), friendlyError, AppInfo.ProductName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            ApplyUpdateFailure(friendlyError);
+            _context.SetStatus("Cập nhật ứng dụng thất bại.");
         }
         finally
         {
-            _isDownloadingUpdate = false;
+            _isApplyingUpdate = false;
             _context.HideProgress();
             RefreshPageState();
         }
@@ -304,49 +343,87 @@ internal sealed class SettingsToolPage : UserControl, IHostedToolView
 
     private void LoadSettingsIntoUi()
     {
-        _currentVersionValueLabel.Text = AppInfo.CurrentVersionLabel;
-        _latestVersionValueLabel.Text = "Chưa kiểm tra";
-        _releaseDateValueLabel.Text = "--";
-        _updateStatusValueLabel.Text = "Sẵn sàng";
-        _releaseNotesBox.Text = "Chưa tải thông tin cập nhật.";
+        _currentVersionValueLabel.Text = $"Phiên bản hiện tại: {AppInfo.CurrentVersionLabel}";
+        _updateStatusValueLabel.Text = "Sẵn sàng kiểm tra cập nhật.";
+        _updateHintValueLabel.Text = "Nhấn cập nhật để kiểm tra bản mới. Nếu có, app sẽ tự tải và khởi động lại để áp dụng.";
         _autoNotifyCheckBox.Checked = _settings.AutoNotifyOnStartup;
-        UpdateLastCheckedLabel();
     }
 
     private void SaveSettings()
     {
         _settingsService.Save(_settings);
-        UpdateLastCheckedLabel();
     }
 
     private void ApplyUpdateSummary(UpdateCheckResult result)
     {
-        _latestVersionValueLabel.Text = result.Metadata.Version;
-        _releaseDateValueLabel.Text = DisplayTextFormatter.FormatReleaseDate(result.Metadata.ReleaseDate);
-        _updateStatusValueLabel.Text = result.HasUpdate ? "Có bản cập nhật" : "Đã là mới nhất";
-        _releaseNotesBox.Text = string.IsNullOrWhiteSpace(result.Metadata.ReleaseNotes)
-            ? "Không có ghi chú phát hành."
-            : result.Metadata.ReleaseNotes.Replace("\n", Environment.NewLine, StringComparison.Ordinal);
-        UpdateLastCheckedLabel();
+        if (!result.IsInstalled)
+        {
+            _updateStatusValueLabel.Text = "Chưa chạy từ bản cài đặt.";
+            _updateHintValueLabel.Text = "Hãy cài bằng setup một lần. Sau đó mỗi lần có bản mới chỉ cần bấm cập nhật trong app.";
+            return;
+        }
+
+        if (result.IsUpdateReadyToRestart)
+        {
+            _updateStatusValueLabel.Text = $"Bản {result.AvailableVersion} đã sẵn sàng.";
+            _updateHintValueLabel.Text = "Nhấn cập nhật để đóng app, áp dụng bản mới và mở lại ngay.";
+            return;
+        }
+
+        if (result.HasUpdate)
+        {
+            _updateStatusValueLabel.Text = $"Có bản cập nhật {result.AvailableVersion}.";
+            _updateHintValueLabel.Text = "Nhấn cập nhật để tải gói mới và khởi động lại ứng dụng.";
+            return;
+        }
+
+        _updateStatusValueLabel.Text = "Bạn đang dùng phiên bản mới nhất.";
+        _updateHintValueLabel.Text = "Khi có bản mới, app có thể nhắc bạn ngay lúc mở nếu tùy chọn bên dưới được bật.";
     }
 
     private void ApplyUpdateFailure(string message)
     {
-        _updateStatusValueLabel.Text = "Kiểm tra thất bại";
-        _releaseNotesBox.Text = message;
-        UpdateLastCheckedLabel();
-    }
-
-    private void UpdateLastCheckedLabel()
-    {
-        _lastCheckedValueLabel.Text = _settings.LastCheckedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) ?? "Chưa từng";
+        _updateStatusValueLabel.Text = "Không thể cập nhật ứng dụng.";
+        _updateHintValueLabel.Text = message;
     }
 
     private void RefreshPageState()
     {
         _autoNotifyCheckBox.Enabled = !IsBusy;
-        _checkUpdatesButton.Enabled = !_isDownloadingUpdate;
-        _downloadUpdateButton.Enabled = !_isCheckingUpdates && HasPendingUpdate;
+        _updateButton.Enabled = !IsBusy;
+        _updateButton.Text = GetUpdateButtonText();
+    }
+
+    private string GetUpdateButtonText()
+    {
+        if (_isApplyingUpdate)
+        {
+            return _lastUpdateCheck?.IsUpdateReadyToRestart == true
+                ? "Đang áp dụng..."
+                : "Đang tải cập nhật...";
+        }
+
+        if (_isCheckingUpdates)
+        {
+            return "Đang kiểm tra...";
+        }
+
+        if (_lastUpdateCheck is { IsInstalled: false })
+        {
+            return "Cài bằng setup";
+        }
+
+        if (_lastUpdateCheck?.IsUpdateReadyToRestart == true)
+        {
+            return "Khởi động lại để cập nhật";
+        }
+
+        if (_lastUpdateCheck?.HasUpdate == true && !string.IsNullOrWhiteSpace(_lastUpdateCheck.AvailableVersion))
+        {
+            return $"Cập nhật lên {_lastUpdateCheck.AvailableVersion}";
+        }
+
+        return "Kiểm tra và cập nhật";
     }
 
     private static Button CreateActionButton(string text, EventHandler onClick)
@@ -356,33 +433,19 @@ internal sealed class SettingsToolPage : UserControl, IHostedToolView
             AutoSize = true,
             Text = text,
             Padding = new Padding(12, 6, 12, 6),
-            Margin = new Padding(0, 0, 10, 0),
+            Margin = new Padding(0),
         };
         button.Click += onClick;
         return button;
     }
 
-    private static Label CreateValueLabel()
+    private static Label CreateBodyLabel(FontStyle fontStyle = FontStyle.Regular)
     {
         return new Label
         {
             AutoSize = true,
-            MaximumSize = new Size(880, 0),
-            Margin = new Padding(0, 6, 0, 6),
+            Font = new Font(Control.DefaultFont, fontStyle),
+            Margin = new Padding(0),
         };
-    }
-
-    private static void AddInfoRow(TableLayoutPanel table, int rowIndex, string caption, Control valueControl)
-    {
-        var captionLabel = new Label
-        {
-            AutoSize = true,
-            Text = caption,
-            Font = new Font(Control.DefaultFont, FontStyle.Bold),
-            Margin = new Padding(0, 6, 12, 6),
-        };
-
-        table.Controls.Add(captionLabel, 0, rowIndex);
-        table.Controls.Add(valueControl, 1, rowIndex);
     }
 }

@@ -1,113 +1,108 @@
-using System.Diagnostics;
-using System.Net.Http.Json;
 using DropshippingTools.Native.Models;
+using Velopack;
 
 namespace DropshippingTools.Native.Services;
 
 internal sealed class UpdateService
 {
-    private static readonly HttpClient HttpClient = new()
-    {
-        Timeout = TimeSpan.FromSeconds(30),
-    };
-
     public async Task<UpdateCheckResult> CheckForUpdatesAsync(CancellationToken cancellationToken = default)
     {
-        var metadataUri = new Uri(AppInfo.UpdateMetadataUrl);
-        using var response = await HttpClient.GetAsync(metadataUri, cancellationToken);
-        response.EnsureSuccessStatusCode();
+        var manager = CreateUpdateManager();
+        var currentVersion = manager.CurrentVersion?.ToString() ?? AppInfo.CurrentVersionLabel;
 
-        var metadata = await response.Content.ReadFromJsonAsync<ReleaseMetadata>(cancellationToken: cancellationToken);
-        if (metadata is null)
+        if (!manager.IsInstalled)
         {
-            throw new InvalidOperationException("Dữ liệu metadata cập nhật đang rỗng.");
+            return new UpdateCheckResult
+            {
+                CurrentVersion = currentVersion,
+                IsInstalled = false,
+                HasUpdate = false,
+                IsUpdateReadyToRestart = false,
+            };
         }
 
-        if (string.IsNullOrWhiteSpace(metadata.DownloadUrl))
+        var pendingUpdate = manager.UpdatePendingRestart;
+        if (pendingUpdate is not null)
         {
-            throw new InvalidOperationException("Metadata cập nhật đang thiếu downloadUrl.");
+            return new UpdateCheckResult
+            {
+                CurrentVersion = currentVersion,
+                AvailableVersion = pendingUpdate.Version.ToString(),
+                ReleaseNotes = pendingUpdate.NotesMarkdown,
+                IsInstalled = true,
+                HasUpdate = true,
+                IsUpdateReadyToRestart = true,
+                PendingAsset = pendingUpdate,
+            };
         }
 
-        var currentVersion = AppInfo.CurrentVersionLabel;
-        var hasUpdate = VersionComparer.Compare(metadata.Version, currentVersion) > 0;
+        cancellationToken.ThrowIfCancellationRequested();
+        var updateInfo = await manager.CheckForUpdatesAsync();
+        if (updateInfo is null)
+        {
+            return new UpdateCheckResult
+            {
+                CurrentVersion = currentVersion,
+                IsInstalled = true,
+                HasUpdate = false,
+                IsUpdateReadyToRestart = false,
+            };
+        }
 
         return new UpdateCheckResult
         {
             CurrentVersion = currentVersion,
-            Metadata = metadata,
-            MetadataUri = metadataUri,
-            HasUpdate = hasUpdate,
+            AvailableVersion = updateInfo.TargetFullRelease.Version.ToString(),
+            ReleaseNotes = updateInfo.TargetFullRelease.NotesMarkdown,
+            IsInstalled = true,
+            HasUpdate = true,
+            IsUpdateReadyToRestart = false,
+            UpdateInfo = updateInfo,
         };
     }
 
-    public async Task DownloadAndReplaceAsync(
+    public async Task DownloadAndApplyAsync(
         UpdateCheckResult update,
         IProgress<int>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        var downloadUri = update.DownloadUri;
-        var tempFilePath = Path.Combine(
-            Path.GetTempPath(),
-            $"DropshippingTools-update-{Guid.NewGuid():N}{Path.GetExtension(downloadUri.AbsolutePath)}");
+        ArgumentNullException.ThrowIfNull(update);
 
-        using (var response = await HttpClient.GetAsync(downloadUri, HttpCompletionOption.ResponseHeadersRead, cancellationToken))
+        var manager = CreateUpdateManager();
+        if (!manager.IsInstalled)
         {
-            response.EnsureSuccessStatusCode();
-
-            var contentLength = response.Content.Headers.ContentLength;
-            await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
-            await using var output = File.Create(tempFilePath);
-
-            var buffer = new byte[81920];
-            long totalRead = 0;
-            int bytesRead;
-
-            while ((bytesRead = await input.ReadAsync(buffer, cancellationToken)) > 0)
-            {
-                await output.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken);
-                totalRead += bytesRead;
-
-                if (contentLength.HasValue && contentLength.Value > 0 && progress is not null)
-                {
-                    var percent = (int)Math.Round((double)totalRead / contentLength.Value * 100, MidpointRounding.AwayFromZero);
-                    progress.Report(Math.Clamp(percent, 0, 100));
-                }
-            }
+            throw new InvalidOperationException("Ứng dụng hiện không chạy từ bản cài đặt. Hãy cài bằng setup để dùng cập nhật tự động.");
         }
 
-        progress?.Report(100);
-        ScheduleExecutableReplacement(tempFilePath);
+        var pendingUpdate = update.PendingAsset ?? manager.UpdatePendingRestart;
+        if (pendingUpdate is not null)
+        {
+            manager.ApplyUpdatesAndRestart(pendingUpdate);
+            return;
+        }
+
+        var updateInfo = update.UpdateInfo;
+        if (updateInfo is null)
+        {
+            updateInfo = await manager.CheckForUpdatesAsync();
+        }
+
+        if (updateInfo is null)
+        {
+            throw new InvalidOperationException("Không tìm thấy bản cập nhật mới.");
+        }
+
+        await manager.DownloadUpdatesAsync(
+            updateInfo,
+            percent => progress?.Report(percent),
+            cancellationToken);
+
+        pendingUpdate = manager.UpdatePendingRestart ?? updateInfo.TargetFullRelease;
+        manager.ApplyUpdatesAndRestart(pendingUpdate);
     }
 
-    private static void ScheduleExecutableReplacement(string downloadedFilePath)
+    private static UpdateManager CreateUpdateManager()
     {
-        var currentExecutablePath = Application.ExecutablePath;
-        var scriptPath = Path.Combine(Path.GetTempPath(), $"DropshippingTools-replace-{Guid.NewGuid():N}.cmd");
-        var scriptContent = $"""
-            @echo off
-            setlocal
-            set "TARGET={currentExecutablePath}"
-            set "SOURCE={downloadedFilePath}"
-
-            :wait_for_exit
-            timeout /t 1 /nobreak > nul
-            copy /y "%SOURCE%" "%TARGET%" > nul 2>&1
-            if errorlevel 1 goto wait_for_exit
-
-            start "" "%TARGET%"
-            del /f /q "%SOURCE%" > nul 2>&1
-            del /f /q "%~f0" > nul 2>&1
-            """;
-
-        File.WriteAllText(scriptPath, scriptContent);
-
-        var startInfo = new ProcessStartInfo("cmd.exe", $"/c \"{scriptPath}\"")
-        {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            WindowStyle = ProcessWindowStyle.Hidden,
-        };
-
-        Process.Start(startInfo);
+        return new UpdateManager(AppInfo.UpdateFeedUrl);
     }
 }

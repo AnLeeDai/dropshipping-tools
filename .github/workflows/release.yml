@@ -1,4 +1,4 @@
-name: Phát hành ứng dụng native
+name: Phat hanh ung dung native
 
 on:
   push:
@@ -9,8 +9,9 @@ on:
       - "DropshippingTools.Native/**"
       - "DropshippingTools.Native.sln"
       - "release.config.json"
-      - "scripts/stage-update-feed.ps1"
+      - "scripts/build-velopack-release.ps1"
       - "scripts/generate-download-page.ps1"
+      - "readme.md"
   workflow_dispatch:
 
 permissions:
@@ -24,63 +25,76 @@ concurrency:
 
 jobs:
   build-pages:
-    name: Xây dựng và đóng gói trang phát hành
+    name: Build and package release site
     runs-on: windows-latest
 
     steps:
-      - name: Lấy mã nguồn
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Cài đặt .NET SDK
+      - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
 
-      - name: Khôi phục gói
+      - name: Restore
         run: dotnet restore DropshippingTools.Native.sln
 
-      - name: Biên dịch
+      - name: Build
         run: dotnet build DropshippingTools.Native.sln --configuration Release --no-restore
 
-      - name: Phát hành ứng dụng Windows một tệp
-        run: dotnet publish DropshippingTools.Native\DropshippingTools.Native.csproj --configuration Release --framework net8.0-windows --runtime win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true --output out\publish\win-x64
-
-      - name: Chuẩn bị nguồn cấp cập nhật
+      - name: Build Velopack release
         shell: pwsh
-        run: ./scripts/stage-update-feed.ps1
+        run: ./scripts/build-velopack-release.ps1 -Configuration Release -Runtime win-x64
 
-      - name: Tạo trang tải xuống
+      - name: Generate download page
         shell: pwsh
         run: ./scripts/generate-download-page.ps1
 
-      - name: Cấu hình GitHub Pages
+      - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
 
-      - name: Ghép gói GitHub Pages
+      - name: Assemble GitHub Pages artifact
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+
+          $releaseConfig = Get-Content -LiteralPath "release.config.json" -Raw | ConvertFrom-Json
+          [xml]$projectXml = Get-Content -LiteralPath "DropshippingTools.Native\DropshippingTools.Native.csproj"
+
+          $feedPath = [string]$releaseConfig.site.updateFeedPath
+          $channel = [string]($projectXml.Project.PropertyGroup.VelopackChannel | Select-Object -First 1)
+          $vpk = (Resolve-Path ".\.tools\vpk\vpk.exe").Path
           $pagesArtifactDir = Join-Path (Resolve-Path "out").Path "pages-publish"
-          $feedSource = (Resolve-Path "out/update-feed").Path
           $siteSource = (Resolve-Path "out/pages-site").Path
-          $targetFeedDir = Join-Path $pagesArtifactDir "updates/win/x64"
+          $releaseSource = (Resolve-Path "out/velopack/win-x64").Path
+          $targetFeedDir = Join-Path $pagesArtifactDir $feedPath.Trim('/')
+
+          if ([string]::IsNullOrWhiteSpace($feedPath) -or [string]::IsNullOrWhiteSpace($channel)) {
+            throw "Missing update feed path or Velopack channel."
+          }
 
           if (Test-Path -LiteralPath $pagesArtifactDir) {
             Remove-Item -LiteralPath $pagesArtifactDir -Recurse -Force
           }
 
-          New-Item -ItemType Directory -Path $targetFeedDir -Force | Out-Null
+          New-Item -ItemType Directory -Path $pagesArtifactDir -Force | Out-Null
           Copy-Item -Path (Join-Path $siteSource "*") -Destination $pagesArtifactDir -Recurse -Force
-          Copy-Item -Path (Join-Path $feedSource "*") -Destination $targetFeedDir -Recurse -Force
+
+          & $vpk upload local --outputDir $releaseSource --channel $channel --path $targetFeedDir --regenerate
+          if ($LASTEXITCODE -ne 0) {
+            throw "vpk upload local failed with exit code $LASTEXITCODE"
+          }
+
           New-Item -ItemType File -Path (Join-Path $pagesArtifactDir ".nojekyll") -Force | Out-Null
 
-      - name: Tải gói GitHub Pages lên
+      - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v4
         with:
           path: out/pages-publish
 
   deploy-pages:
-    name: Triển khai trang phát hành
+    name: Deploy release site
     needs: build-pages
     runs-on: ubuntu-latest
     environment:
@@ -88,6 +102,6 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
-      - name: Triển khai lên GitHub Pages
+      - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
