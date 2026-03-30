@@ -418,7 +418,7 @@ export function SettingsPage() {
             <CardContent className="space-y-1">
               <DetailRow label="Tên ứng dụng" value="Dropshipping Tools" />
               <DetailRow label="Tác giả" value="An Lee Dai" />
-              <DetailRow label="Nguồn cập nhật" value="GitHub Pages + GitHub Releases" isLast />
+              <DetailRow label="Nguồn cập nhật" value="GitHub Pages" isLast />
             </CardContent>
           </Card>
         </div>

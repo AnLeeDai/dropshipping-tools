@@ -2,8 +2,13 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const projectRoot = path.resolve(__dirname, "..");
+const releaseConfig = require(path.join(projectRoot, "release.config.json"));
 const buildOutputDir = path.join(projectRoot, "out", "make");
 const stagingDir = path.join(projectRoot, "out", "update-feed");
+
+function formatReleaseNotes(notes) {
+  return notes.map((note) => `• ${note}`).join("\n");
+}
 
 function ensureDirectoryExists(targetDir) {
   fs.mkdirSync(targetDir, {
@@ -49,6 +54,19 @@ function copyArtifacts(filePaths) {
     const destinationPath = path.join(stagingDir, path.basename(filePath));
     fs.copyFileSync(filePath, destinationPath);
   }
+
+  const releaseMetadata = {
+    version: String(releaseConfig.release.version).replace(/^v/i, "").trim(),
+    releaseName: releaseConfig.release.name,
+    releaseNotes: formatReleaseNotes(releaseConfig.release.notes),
+    releaseDate: releaseConfig.release.publishedAt || null,
+  };
+
+  fs.writeFileSync(
+    path.join(stagingDir, "release.json"),
+    `${JSON.stringify(releaseMetadata, null, 2)}\n`,
+    "utf8",
+  );
 }
 
 function main() {

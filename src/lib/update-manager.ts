@@ -10,12 +10,11 @@ import {
   type ReleaseMetadata,
 } from "./update-utils";
 
-interface GitHubReleaseResponse {
-  tag_name: string;
-  name: string;
-  body: string | null;
-  published_at: string | null;
-  created_at: string | null;
+interface HostedReleaseMetadataResponse {
+  version?: string;
+  releaseName?: string;
+  releaseNotes?: string;
+  releaseDate?: string | null;
 }
 
 export interface UpdateState {
@@ -72,6 +71,21 @@ function getCurrentVersion(): string {
 function getRepositorySlug(): string {
   const { owner, name } = releaseConfig.repository;
   return `${owner}/${name}`;
+}
+
+function getUpdateFeedBaseUrl(): string | null {
+  const feedUrl = releaseConfig.autoUpdate.feedUrl?.trim();
+  return feedUrl && feedUrl.length > 0 ? feedUrl : null;
+}
+
+function getReleaseMetadataUrl(): string {
+  const feedUrl = getUpdateFeedBaseUrl();
+
+  if (!feedUrl) {
+    throw new Error("Auto update feed URL is missing from release.config.json.");
+  }
+
+  return new URL("release.json", `${feedUrl.replace(/\/+$/, "")}/`).toString();
 }
 
 function getUpdateConfigPath(): string {
@@ -193,7 +207,7 @@ function rejectNativeCheck(error: Error): void {
 
 function createReleaseLookupError(error: unknown): Error {
   if (error instanceof Error && error.name === "AbortError") {
-    return new Error("Timed out while loading release metadata from GitHub Releases.");
+    return new Error("Timed out while loading release metadata from the update feed.");
   }
 
   if (error instanceof Error) {
@@ -206,12 +220,11 @@ function createReleaseLookupError(error: unknown): Error {
 async function fetchLatestReleaseMetadata(): Promise<ReleaseMetadata> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), RELEASE_LOOKUP_TIMEOUT_MS);
-  const { owner, name } = releaseConfig.repository;
 
   try {
-    const response = await fetch(`https://api.github.com/repos/${owner}/${name}/releases/latest`, {
+    const response = await fetch(getReleaseMetadataUrl(), {
       headers: {
-        Accept: "application/vnd.github+json",
+        Accept: "application/json",
         "User-Agent": app.getName(),
       },
       signal: controller.signal,
@@ -219,27 +232,26 @@ async function fetchLatestReleaseMetadata(): Promise<ReleaseMetadata> {
 
     if (!response.ok) {
       if (response.status === 403) {
-        throw new Error("GitHub Releases metadata is temporarily unavailable. Try again in a few minutes.");
+        throw new Error("Update feed metadata is temporarily unavailable. Try again in a few minutes.");
       }
 
       if (response.status === 404) {
-        throw new Error("No published GitHub Release was found for this repository.");
+        throw new Error("Update feed metadata file was not found.");
       }
 
-      throw new Error(`GitHub release lookup failed with status ${response.status}`);
+      throw new Error(`Update feed metadata lookup failed with status ${response.status}`);
     }
 
-    const payload = (await response.json()) as GitHubReleaseResponse;
-    const releaseNotes =
-      payload.body && payload.body.trim().length > 0
-        ? payload.body.trim()
-        : currentReleaseMetadata.releaseNotes;
+    const payload = (await response.json()) as HostedReleaseMetadataResponse;
+    const version = normalizeVersion(payload.version || currentReleaseMetadata.version);
+    const releaseName = payload.releaseName?.trim() || `v${version}`;
+    const releaseNotes = payload.releaseNotes?.trim() || currentReleaseMetadata.releaseNotes;
 
     return {
-      version: normalizeVersion(payload.tag_name || payload.name || currentReleaseMetadata.version),
-      releaseName: payload.name?.trim() || `v${normalizeVersion(payload.tag_name || currentReleaseMetadata.version)}`,
+      version,
+      releaseName,
       releaseNotes,
-      releaseDate: payload.published_at || payload.created_at || currentReleaseMetadata.releaseDate,
+      releaseDate: normalizeReleaseDate(payload.releaseDate) || currentReleaseMetadata.releaseDate,
     };
   } catch (error) {
     throw createReleaseLookupError(error);

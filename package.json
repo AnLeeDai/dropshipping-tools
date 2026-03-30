@@ -1,7 +1,7 @@
 {
   "name": "dropshipping-tools",
   "productName": "dropshipping-tools",
-  "version": "0.0.2",
+  "version": "0.0.4",
   "description": "Desktop tools for dropshipping workflows",
   "main": ".vite/build/main.js",
   "private": true,
