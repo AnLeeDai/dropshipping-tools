@@ -8,9 +8,9 @@
     "feedUrl": "https://anleedai.github.io/dropshipping-tools/updates/win/x64"
   },
   "release": {
-    "version": "0.0.2",
+    "version": "0.0.3",
     "name": "Sửa lỗi UI, cập nhật thêm tùy chọn trích xuất PDF",
-    "publishedAt": "2026-03-27",
+    "publishedAt": "2026-03-30",
     "notes": [
       "Sửa lỗi hiển thị giao diện và đồng bộ lại bố cục để thống nhất hơn trong toàn bộ ứng dụng.",
       "Cập nhật thêm các tùy chọn khi trích xuất PDF để luồng xử lý linh hoạt hơn.",
