@@ -1,4 +1,5 @@
 using DropshippingTools.Native.Shell;
+using DropshippingTools.Native.UI.Controls;
 
 namespace DropshippingTools.Native;
 
@@ -9,7 +10,7 @@ internal sealed class MainForm : Form
     private readonly Dictionary<string, TabPage> _tabsById;
     private readonly List<Control> _hostedViews = [];
 
-    private readonly TabControl _tabs = new() { Dock = DockStyle.Fill };
+    private readonly TabControl _tabs = new BufferedTabControl { Dock = DockStyle.Fill };
     private readonly StatusStrip _statusStrip = new();
     private readonly ToolStripStatusLabel _statusLabel = new() { Text = "Sẵn sàng" };
     private readonly ToolStripProgressBar _statusProgressBar = new()
@@ -46,6 +47,8 @@ internal sealed class MainForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(1100, 720);
         Size = new Size(1280, 820);
+        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
+        UpdateStyles();
 
         SuspendLayout();
         InitializeTabs();

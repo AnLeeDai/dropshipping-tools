@@ -56,9 +56,8 @@ internal sealed class PdfTextExtractor
 
             var dictionaryStart = Math.Max(0, streamIndex - 512);
             var dictionary = pdfText[dictionaryStart..streamIndex];
-            var streamBytes = fileBytes[dataStart..endStreamIndex];
-
-            var decoded = TryDecodeStream(streamBytes, dictionary);
+            var streamLength = endStreamIndex - dataStart;
+            var decoded = TryDecodeStream(fileBytes, dataStart, streamLength, dictionary);
             if (!string.IsNullOrWhiteSpace(decoded))
             {
                 yield return decoded;
@@ -68,13 +67,13 @@ internal sealed class PdfTextExtractor
         }
     }
 
-    private static string TryDecodeStream(byte[] streamBytes, string dictionary)
+    private static string TryDecodeStream(byte[] fileBytes, int offset, int length, string dictionary)
     {
         if (dictionary.Contains("/FlateDecode", StringComparison.Ordinal))
         {
             try
             {
-                using var input = new MemoryStream(streamBytes);
+                using var input = new MemoryStream(fileBytes, offset, length, writable: false);
                 using var zlib = new ZLibStream(input, CompressionMode.Decompress);
                 using var output = new MemoryStream();
                 zlib.CopyTo(output);
@@ -84,7 +83,7 @@ internal sealed class PdfTextExtractor
             {
                 try
                 {
-                    using var input = new MemoryStream(streamBytes);
+                    using var input = new MemoryStream(fileBytes, offset, length, writable: false);
                     using var deflate = new DeflateStream(input, CompressionMode.Decompress);
                     using var output = new MemoryStream();
                     deflate.CopyTo(output);
@@ -97,7 +96,7 @@ internal sealed class PdfTextExtractor
             }
         }
 
-        return Encoding.Latin1.GetString(streamBytes);
+        return Encoding.Latin1.GetString(fileBytes, offset, length);
     }
 
     private static List<string> ExtractTextItems(string content)
@@ -339,10 +338,12 @@ internal sealed class PdfTextExtractor
         }
 
         var bytes = new byte[hex.Length / 2];
+        var hexSpan = hex.AsSpan();
+
         for (var i = 0; i < bytes.Length; i += 1)
         {
             // Some Etsy PDFs contain malformed <...> blocks; skip those blocks instead of failing the whole file.
-            if (!byte.TryParse(hex.Substring(i * 2, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out bytes[i]))
+            if (!byte.TryParse(hexSpan.Slice(i * 2, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out bytes[i]))
             {
                 return string.Empty;
             }
@@ -397,15 +398,7 @@ internal sealed class PdfTextExtractor
 
         foreach (var line in lines)
         {
-            var normalized = line
-                .Replace('\u00A0', ' ')
-                .Replace("\t", " ")
-                .Trim();
-
-            while (normalized.Contains("  ", StringComparison.Ordinal))
-            {
-                normalized = normalized.Replace("  ", " ", StringComparison.Ordinal);
-            }
+            var normalized = NormalizeLine(line);
 
             if (string.IsNullOrWhiteSpace(normalized))
             {
@@ -421,5 +414,37 @@ internal sealed class PdfTextExtractor
         }
 
         return cleaned;
+    }
+
+    private static string NormalizeLine(string line)
+    {
+        var builder = new StringBuilder(line.Length);
+        var previousWasWhitespace = false;
+
+        foreach (var current in line)
+        {
+            var normalized = current is '\u00A0' or '\t' ? ' ' : current;
+            if (char.IsWhiteSpace(normalized))
+            {
+                if (builder.Length == 0 || previousWasWhitespace)
+                {
+                    continue;
+                }
+
+                builder.Append(' ');
+                previousWasWhitespace = true;
+                continue;
+            }
+
+            builder.Append(normalized);
+            previousWasWhitespace = false;
+        }
+
+        if (builder.Length > 0 && builder[^1] == ' ')
+        {
+            builder.Length -= 1;
+        }
+
+        return builder.ToString();
     }
 }

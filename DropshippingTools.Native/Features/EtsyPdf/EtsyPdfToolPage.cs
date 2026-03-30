@@ -1,9 +1,9 @@
-using System.ComponentModel;
 using System.Globalization;
 using DropshippingTools.Native.Formatting;
 using DropshippingTools.Native.Models;
 using DropshippingTools.Native.Services;
 using DropshippingTools.Native.Shell;
+using DropshippingTools.Native.UI.Controls;
 
 namespace DropshippingTools.Native.Features.EtsyPdf;
 
@@ -11,7 +11,8 @@ internal sealed class EtsyPdfToolPage : UserControl
 {
     private readonly ToolHostContext _context;
     private readonly EtsyPdfParser _etsyPdfParser;
-    private readonly BindingList<ParsedEtsyRow> _parsedRows = [];
+    private readonly BindingSource _resultsBindingSource = new();
+    private readonly List<ParsedEtsyRow> _parsedRows = [];
     private readonly List<QueuedPdfFile> _queuedFiles = [];
 
     private bool _isProcessingQueue;
@@ -29,6 +30,7 @@ internal sealed class EtsyPdfToolPage : UserControl
     {
         _context = context ?? throw new ArgumentNullException(nameof(context));
         _etsyPdfParser = etsyPdfParser ?? throw new ArgumentNullException(nameof(etsyPdfParser));
+        _resultsBindingSource.DataSource = _parsedRows;
 
         Dock = DockStyle.Fill;
         AllowDrop = true;
@@ -113,7 +115,7 @@ internal sealed class EtsyPdfToolPage : UserControl
             Margin = new Padding(0, 0, 0, 8),
         };
 
-        _queueListView = new ListView
+        _queueListView = new BufferedListView
         {
             Dock = DockStyle.Fill,
             FullRowSelect = true,
@@ -152,7 +154,7 @@ internal sealed class EtsyPdfToolPage : UserControl
             Margin = new Padding(0, 0, 0, 8),
         };
 
-        _resultsGrid = new DataGridView
+        _resultsGrid = new BufferedDataGridView
         {
             Dock = DockStyle.Fill,
             ReadOnly = true,
@@ -163,7 +165,7 @@ internal sealed class EtsyPdfToolPage : UserControl
             SelectionMode = DataGridViewSelectionMode.FullRowSelect,
             AutoGenerateColumns = false,
             RowHeadersVisible = false,
-            DataSource = _parsedRows,
+            DataSource = _resultsBindingSource,
         };
 
         _resultsGrid.Columns.Add(CreateTextColumn("OrderId", "Order ID", 120));
@@ -240,7 +242,7 @@ internal sealed class EtsyPdfToolPage : UserControl
 
     private void HandleClearResults(object? sender, EventArgs e)
     {
-        _parsedRows.Clear();
+        ReplaceParsedRows([]);
         RefreshPageState();
         _context.SetStatus("Đã xóa kết quả.");
     }
@@ -312,27 +314,50 @@ internal sealed class EtsyPdfToolPage : UserControl
         }
 
         _isProcessingQueue = true;
-        _parsedRows.Clear();
+        ReplaceParsedRows([]);
         ResetQueuedFilesForProcessing();
 
         _context.ShowProgress(maximum: _queuedFiles.Count, value: 0, style: ProgressBarStyle.Continuous);
         RefreshQueueView();
         RefreshPageState();
-        _context.SetStatus("Đang xử lý hàng chờ PDF...");
+
+        var parallelism = GetRecommendedParallelism();
+        _context.SetStatus($"Đang xử lý hàng chờ PDF với {parallelism} luồng...");
 
         var processedCount = 0;
+        var processingResults = new FileProcessingResult?[_queuedFiles.Count];
 
         try
         {
-            foreach (var queuedFile in _queuedFiles)
+            var parallelOptions = new ParallelOptions
             {
-                await ProcessQueuedFileAsync(queuedFile);
-                processedCount += 1;
-                _context.SetProgressValue(processedCount);
-                RefreshQueueView();
+                MaxDegreeOfParallelism = parallelism,
+            };
+
+            await Parallel.ForEachAsync(Enumerable.Range(0, _queuedFiles.Count), parallelOptions, (index, _) =>
+            {
+                ReportQueueProcessingUpdate(QueueProcessingUpdate.Started(index));
+
+                var result = ProcessQueuedFile(_queuedFiles[index]);
+                processingResults[index] = result;
+
+                var completedCount = Interlocked.Increment(ref processedCount);
+                ReportQueueProcessingUpdate(QueueProcessingUpdate.Completed(index, completedCount, result));
+
+                return ValueTask.CompletedTask;
+            });
+
+            var mergedRows = new List<ParsedEtsyRow>();
+            foreach (var result in processingResults)
+            {
+                if (result is not null && result.Rows.Count > 0)
+                {
+                    mergedRows.AddRange(result.Rows);
+                }
             }
 
-            _context.SetStatus($"Đã xử lý xong {_queuedFiles.Count} tệp. Đã phân tích {_parsedRows.Count} dòng.");
+            ReplaceParsedRows(mergedRows);
+            _context.SetStatus($"Đã xử lý xong {_queuedFiles.Count} tệp bằng {parallelism} luồng. Đã phân tích {_parsedRows.Count} dòng.");
         }
         finally
         {
@@ -342,29 +367,16 @@ internal sealed class EtsyPdfToolPage : UserControl
         }
     }
 
-    private async Task ProcessQueuedFileAsync(QueuedPdfFile queuedFile)
+    private FileProcessingResult ProcessQueuedFile(QueuedPdfFile queuedFile)
     {
-        queuedFile.StatusText = "Đang xử lý";
-        queuedFile.ErrorMessage = string.Empty;
-        RefreshQueueView();
-        _context.SetStatus($"Đang xử lý {queuedFile.FileName}...");
-
         try
         {
-            var rows = await Task.Run(() => _etsyPdfParser.ParseFile(queuedFile.FilePath));
-            foreach (var row in rows)
-            {
-                _parsedRows.Add(row);
-            }
-
-            queuedFile.RowCount = rows.Count;
-            queuedFile.StatusText = rows.Count > 0 ? "Hoàn tất" : "Không có dữ liệu";
-            queuedFile.ErrorMessage = rows.Count > 0 ? string.Empty : "Không tìm thấy dòng Etsy hợp lệ trong tệp.";
+            var rows = _etsyPdfParser.ParseFile(queuedFile.FilePath);
+            return FileProcessingResult.Success(rows);
         }
         catch (Exception ex)
         {
-            queuedFile.StatusText = "Thất bại";
-            queuedFile.ErrorMessage = FriendlyErrorFormatter.Format(ex);
+            return FileProcessingResult.Failure(FriendlyErrorFormatter.Format(ex));
         }
     }
 
@@ -381,20 +393,90 @@ internal sealed class EtsyPdfToolPage : UserControl
     private void RefreshQueueView()
     {
         _queueListView.BeginUpdate();
-        _queueListView.Items.Clear();
-
-        foreach (var queuedFile in _queuedFiles)
+        try
         {
-            var item = new ListViewItem(queuedFile.FileName);
-            item.SubItems.Add(DisplayTextFormatter.FormatFileSize(queuedFile.FileSizeBytes));
-            item.SubItems.Add(queuedFile.StatusText);
-            item.SubItems.Add(queuedFile.RowCount.ToString(CultureInfo.InvariantCulture));
-            item.SubItems.Add(queuedFile.ErrorMessage ?? string.Empty);
-            _queueListView.Items.Add(item);
+            _queueListView.Items.Clear();
+            foreach (var queuedFile in _queuedFiles)
+            {
+                _queueListView.Items.Add(CreateQueueItem(queuedFile));
+            }
+        }
+        finally
+        {
+            _queueListView.EndUpdate();
         }
 
-        _queueListView.EndUpdate();
         RefreshPageState();
+    }
+
+    private void RefreshQueueItem(int index)
+    {
+        if (index < 0 || index >= _queuedFiles.Count || index >= _queueListView.Items.Count)
+        {
+            return;
+        }
+
+        ApplyQueueItemState(_queueListView.Items[index], _queuedFiles[index]);
+    }
+
+    private void HandleQueueProcessingUpdate(QueueProcessingUpdate update)
+    {
+        if (update.FileIndex < 0 || update.FileIndex >= _queuedFiles.Count)
+        {
+            return;
+        }
+
+        var queuedFile = _queuedFiles[update.FileIndex];
+        if (update.IsStarted)
+        {
+            queuedFile.StatusText = "Đang xử lý";
+            queuedFile.RowCount = 0;
+            queuedFile.ErrorMessage = string.Empty;
+            RefreshQueueItem(update.FileIndex);
+            return;
+        }
+
+        if (update.Result is null)
+        {
+            return;
+        }
+
+        queuedFile.RowCount = update.Result.Rows.Count;
+        queuedFile.StatusText = update.Result.IsSuccessful
+            ? update.Result.Rows.Count > 0 ? "Hoàn tất" : "Không có dữ liệu"
+            : "Thất bại";
+        queuedFile.ErrorMessage = update.Result.IsSuccessful
+            ? update.Result.Rows.Count > 0 ? string.Empty : "Không tìm thấy dòng Etsy hợp lệ trong tệp."
+            : update.Result.ErrorMessage;
+
+        RefreshQueueItem(update.FileIndex);
+        _context.SetProgressValue(update.CompletedCount);
+        _context.SetStatus($"Đã xử lý {update.CompletedCount}/{_queuedFiles.Count} tệp...");
+    }
+
+    private void ReportQueueProcessingUpdate(QueueProcessingUpdate update)
+    {
+        if (IsDisposed)
+        {
+            return;
+        }
+
+        if (!InvokeRequired)
+        {
+            HandleQueueProcessingUpdate(update);
+            return;
+        }
+
+        try
+        {
+            Invoke(new Action<QueueProcessingUpdate>(HandleQueueProcessingUpdate), update);
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
     }
 
     private void RefreshPageState()
@@ -405,6 +487,22 @@ internal sealed class EtsyPdfToolPage : UserControl
         _processQueueButton.Enabled = !_isProcessingQueue && HasQueuedFiles;
         _clearResultsButton.Enabled = !_isProcessingQueue && HasParsedRows;
         _copyResultsButton.Enabled = !_isProcessingQueue && HasParsedRows;
+    }
+
+    private void ReplaceParsedRows(IEnumerable<ParsedEtsyRow> rows)
+    {
+        _parsedRows.Clear();
+        _parsedRows.AddRange(rows);
+        _resultsBindingSource.ResetBindings(metadataChanged: false);
+    }
+
+    private int GetRecommendedParallelism()
+    {
+        var workerSlots = Environment.ProcessorCount <= 2
+            ? 1
+            : Environment.ProcessorCount - 1;
+
+        return Math.Min(Math.Max(1, workerSlots), _queuedFiles.Count);
     }
 
     private static Button CreateActionButton(string text, EventHandler onClick)
@@ -429,6 +527,26 @@ internal sealed class EtsyPdfToolPage : UserControl
             Width = width,
             SortMode = DataGridViewColumnSortMode.NotSortable,
         };
+    }
+
+    private static ListViewItem CreateQueueItem(QueuedPdfFile queuedFile)
+    {
+        var item = new ListViewItem(queuedFile.FileName);
+        item.SubItems.Add(string.Empty);
+        item.SubItems.Add(string.Empty);
+        item.SubItems.Add(string.Empty);
+        item.SubItems.Add(string.Empty);
+        ApplyQueueItemState(item, queuedFile);
+        return item;
+    }
+
+    private static void ApplyQueueItemState(ListViewItem item, QueuedPdfFile queuedFile)
+    {
+        item.Text = queuedFile.FileName;
+        item.SubItems[1].Text = DisplayTextFormatter.FormatFileSize(queuedFile.FileSizeBytes);
+        item.SubItems[2].Text = queuedFile.StatusText;
+        item.SubItems[3].Text = queuedFile.RowCount.ToString(CultureInfo.InvariantCulture);
+        item.SubItems[4].Text = queuedFile.ErrorMessage ?? string.Empty;
     }
 
     private static bool TryCreateQueuedFile(string filePath, out QueuedPdfFile queuedFile)
@@ -467,5 +585,31 @@ internal sealed class EtsyPdfToolPage : UserControl
     private static bool IsPdfFile(string path)
     {
         return path.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private sealed record FileProcessingResult(IReadOnlyList<ParsedEtsyRow> Rows, bool IsSuccessful, string ErrorMessage)
+    {
+        public static FileProcessingResult Success(IReadOnlyList<ParsedEtsyRow> rows)
+        {
+            return new FileProcessingResult(rows, IsSuccessful: true, ErrorMessage: string.Empty);
+        }
+
+        public static FileProcessingResult Failure(string errorMessage)
+        {
+            return new FileProcessingResult([], IsSuccessful: false, ErrorMessage: errorMessage);
+        }
+    }
+
+    private sealed record QueueProcessingUpdate(int FileIndex, bool IsStarted, int CompletedCount, FileProcessingResult? Result)
+    {
+        public static QueueProcessingUpdate Started(int fileIndex)
+        {
+            return new QueueProcessingUpdate(fileIndex, IsStarted: true, CompletedCount: 0, Result: null);
+        }
+
+        public static QueueProcessingUpdate Completed(int fileIndex, int completedCount, FileProcessingResult result)
+        {
+            return new QueueProcessingUpdate(fileIndex, IsStarted: false, CompletedCount: completedCount, Result: result);
+        }
     }
 }

@@ -1,4 +1,5 @@
 using DropshippingTools.Native.Composition;
+using DropshippingTools.Native.Services;
 
 namespace DropshippingTools.Native;
 
@@ -8,6 +9,7 @@ static class Program
     static void Main()
     {
         ApplicationConfiguration.Initialize();
+        UnhandledExceptionHandler.Register();
         Application.Run(ApplicationBootstrapper.CreateMainForm());
     }
 }
