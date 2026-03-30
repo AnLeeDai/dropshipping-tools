@@ -93,6 +93,12 @@ jobs:
             throw "vpk upload local failed with exit code $LASTEXITCODE"
           }
 
+          Get-ChildItem -LiteralPath $releaseSource -File |
+            Where-Object { $_.Name -like "*Setup.exe" -or $_.Name -like "*Installer.exe" } |
+            ForEach-Object {
+              Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $targetFeedDir $_.Name) -Force
+            }
+
           New-Item -ItemType File -Path (Join-Path $pagesArtifactDir ".nojekyll") -Force | Out-Null
 
       - name: Upload GitHub Pages artifact
