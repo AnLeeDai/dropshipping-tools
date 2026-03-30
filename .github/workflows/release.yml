@@ -1,4 +1,4 @@
-name: Release Desktop App
+name: Phát hành ứng dụng native
 
 on:
   push:
@@ -6,11 +6,11 @@ on:
       - main
     paths:
       - ".github/workflows/release.yml"
-      - "electron-builder.config.cjs"
-      - "scripts/generate-download-page.cjs"
+      - "DropshippingTools.Native/**"
+      - "DropshippingTools.Native.sln"
       - "release.config.json"
-      - "scripts/stage-update-feed.cjs"
-      - "scripts/prepare-release.cjs"
+      - "scripts/stage-update-feed.ps1"
+      - "scripts/generate-download-page.ps1"
   workflow_dispatch:
 
 permissions:
@@ -24,44 +24,40 @@ concurrency:
 
 jobs:
   build-pages:
+    name: Xây dựng và đóng gói trang phát hành
     runs-on: windows-latest
 
     steps:
-      - name: Checkout source
+      - name: Lấy mã nguồn
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Cài đặt .NET SDK
+        uses: actions/setup-dotnet@v4
         with:
-          node-version: 22
-          cache: npm
+          dotnet-version: 8.0.x
 
-      - name: Prepare release metadata
-        id: release
-        run: node scripts/prepare-release.cjs
+      - name: Khôi phục gói
+        run: dotnet restore DropshippingTools.Native.sln
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Biên dịch
+        run: dotnet build DropshippingTools.Native.sln --configuration Release --no-restore
 
-      - name: Lint
-        run: npm run lint
+      - name: Phát hành ứng dụng Windows một tệp
+        run: dotnet publish DropshippingTools.Native\DropshippingTools.Native.csproj --configuration Release --framework net8.0-windows --runtime win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true --output out\publish\win-x64
 
-      - name: Test
-        run: npm test
+      - name: Chuẩn bị nguồn cấp cập nhật
+        shell: pwsh
+        run: ./scripts/stage-update-feed.ps1
 
-      - name: Build Windows distributables
-        run: npm run make
+      - name: Tạo trang tải xuống
+        shell: pwsh
+        run: ./scripts/generate-download-page.ps1
 
-      - name: Stage update feed assets
-        run: node scripts/stage-update-feed.cjs
-
-      - name: Generate download page
-        run: node scripts/generate-download-page.cjs
-
-      - name: Configure GitHub Pages
+      - name: Cấu hình GitHub Pages
         uses: actions/configure-pages@v5
 
-      - name: Assemble GitHub Pages artifact
+      - name: Ghép gói GitHub Pages
+        shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           $pagesArtifactDir = Join-Path (Resolve-Path "out").Path "pages-publish"
@@ -69,7 +65,7 @@ jobs:
           $siteSource = (Resolve-Path "out/pages-site").Path
           $targetFeedDir = Join-Path $pagesArtifactDir "updates/win/x64"
 
-          if (Test-Path $pagesArtifactDir) {
+          if (Test-Path -LiteralPath $pagesArtifactDir) {
             Remove-Item -LiteralPath $pagesArtifactDir -Recurse -Force
           }
 
@@ -78,12 +74,13 @@ jobs:
           Copy-Item -Path (Join-Path $feedSource "*") -Destination $targetFeedDir -Recurse -Force
           New-Item -ItemType File -Path (Join-Path $pagesArtifactDir ".nojekyll") -Force | Out-Null
 
-      - name: Upload GitHub Pages artifact
+      - name: Tải gói GitHub Pages lên
         uses: actions/upload-pages-artifact@v4
         with:
           path: out/pages-publish
 
   deploy-pages:
+    name: Triển khai trang phát hành
     needs: build-pages
     runs-on: ubuntu-latest
     environment:
@@ -91,6 +88,6 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
-      - name: Deploy to GitHub Pages
+      - name: Triển khai lên GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4

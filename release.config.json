@@ -1,21 +1,15 @@
 {
-  "repository": {
-    "owner": "AnLeeDai",
-    "name": "dropshipping-tools"
-  },
-  "autoUpdate": {
-    "checkIntervalMinutes": 60,
-    "feedUrl": "https://anleedai.github.io/dropshipping-tools/updates/win/x64"
+  "site": {
+    "baseUrl": "https://anleedai.github.io/dropshipping-tools",
+    "updateFeedPath": "updates/win/x64"
   },
   "release": {
-    "version": "0.0.4",
-    "name": "Chuyen phat hanh sang GitHub Pages va toi uu auto-update",
+    "name": "Bản phát hành 0.0.4",
     "publishedAt": "2026-03-30",
     "notes": [
-      "Bo GitHub Release khoi quy trinh phat hanh, chuyen sang dung GitHub Pages de public file tai ung dung va feed auto-update.",
-      "Them trang tai rieng chi hien thi nut tai setup.exe de nguoi dung cuoi khong phai xem cac asset noi bo cua updater.",
-      "Chuyen metadata cap nhat sang release.json tren GitHub Pages de ung dung van hien thi dung phien ban, ngay phat hanh va noi dung ban moi khi repo de private.",
-      "Toi uu trai nghiem update tren Windows: tai xong chi can khoi dong lai ung dung de ap dung ban moi."
+      "Thêm công cụ xử lý PDF Etsy.",
+      "Hỗ trợ hàng chờ nhiều tệp và sao chép kết quả.",
+      "Cập nhật cấu trúc ứng dụng theo mô hình nhiều công cụ."
     ]
   }
 }
