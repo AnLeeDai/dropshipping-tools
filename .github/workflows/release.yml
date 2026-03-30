@@ -1,0 +1,125 @@
+name: Release Desktop App
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/release.yml"
+      - "electron-builder.config.cjs"
+      - "release.config.json"
+      - "scripts/stage-update-feed.cjs"
+      - "scripts/prepare-release.cjs"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Prepare release metadata
+        id: release
+        run: node scripts/prepare-release.cjs
+
+      - name: Ensure release version is new
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ steps.release.outputs.tag }}"
+          gh release view $tag *> $null
+          $releaseExists = $LASTEXITCODE -eq 0
+
+          if ($releaseExists) {
+            Write-Error "Release tag $tag already exists. Increase release.config.json version before merging to main."
+            exit 1
+          }
+
+          exit 0
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Build Windows distributables
+        run: npm run make
+
+      - name: Stage update feed assets
+        run: node scripts/stage-update-feed.cjs
+
+      - name: Publish update feed to gh-pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $remote = "https://x-access-token:${env:GH_TOKEN}@github.com/${{ github.repository }}.git"
+          $feedSource = (Resolve-Path "out/update-feed").Path
+          $feedBranchDir = Join-Path $env:RUNNER_TEMP "gh-pages-feed"
+
+          if (Test-Path $feedBranchDir) {
+            Remove-Item -LiteralPath $feedBranchDir -Recurse -Force
+          }
+
+          git ls-remote --exit-code --heads $remote gh-pages *> $null
+          $hasGhPagesBranch = $LASTEXITCODE -eq 0
+
+          if ($hasGhPagesBranch) {
+            git clone --depth 1 --branch gh-pages $remote $feedBranchDir
+          } else {
+            git clone --depth 1 $remote $feedBranchDir
+            Push-Location $feedBranchDir
+            git checkout --orphan gh-pages
+            Get-ChildItem -Force | Where-Object { $_.Name -ne ".git" } | Remove-Item -Recurse -Force
+            Pop-Location
+          }
+
+          $targetDir = Join-Path $feedBranchDir "updates/win/x64"
+          New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+          Copy-Item -Path (Join-Path $feedSource "*") -Destination $targetDir -Recurse -Force
+
+          Push-Location $feedBranchDir
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add updates/win/x64
+
+          git diff --cached --quiet
+          $hasChanges = $LASTEXITCODE -ne 0
+
+          if ($hasChanges) {
+            git commit -m "Publish update feed for ${{ steps.release.outputs.tag }}"
+            git push origin gh-pages
+          } else {
+            Write-Host "Update feed is already up to date."
+          }
+
+          Pop-Location
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release.outputs.tag }}
+          name: ${{ steps.release.outputs.release_name }}
+          body_path: ${{ steps.release.outputs.notes_file }}
+          draft: false
+          prerelease: false
+          files: |
+            out/make/**/*.exe

@@ -1,0 +1,20 @@
+{
+  "repository": {
+    "owner": "AnLeeDai",
+    "name": "dropshipping-tools"
+  },
+  "autoUpdate": {
+    "checkIntervalMinutes": 60,
+    "feedUrl": "https://anleedai.github.io/dropshipping-tools/updates/win/x64"
+  },
+  "release": {
+    "version": "0.0.3",
+    "name": "Sửa lỗi UI, cập nhật thêm tùy chọn trích xuất PDF",
+    "publishedAt": "2026-03-30",
+    "notes": [
+      "Sửa lỗi hiển thị giao diện và đồng bộ lại bố cục để thống nhất hơn trong toàn bộ ứng dụng.",
+      "Cập nhật thêm các tùy chọn khi trích xuất PDF để luồng xử lý linh hoạt hơn.",
+      "Cải thiện metadata phát hành để tiêu đề và mô tả cập nhật hiển thị đúng trong màn hình Cài đặt và hộp thoại update."
+    ]
+  }
+}
