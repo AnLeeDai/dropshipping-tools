@@ -1,4 +1,4 @@
-name: Release Desktop App
+name: Publish Native App
 
 on:
   push:
@@ -6,11 +6,11 @@ on:
       - main
     paths:
       - ".github/workflows/release.yml"
-      - "electron-builder.config.cjs"
-      - "scripts/generate-download-page.cjs"
+      - "DropshippingTools.Native/**"
+      - "DropshippingTools.Native.sln"
       - "release.config.json"
-      - "scripts/stage-update-feed.cjs"
-      - "scripts/prepare-release.cjs"
+      - "scripts/stage-update-feed.ps1"
+      - "scripts/generate-download-page.ps1"
   workflow_dispatch:
 
 permissions:
@@ -30,38 +30,33 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
         with:
-          node-version: 22
-          cache: npm
+          dotnet-version: 8.0.x
 
-      - name: Prepare release metadata
-        id: release
-        run: node scripts/prepare-release.cjs
+      - name: Restore
+        run: dotnet restore DropshippingTools.Native.sln
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Build
+        run: dotnet build DropshippingTools.Native.sln --configuration Release --no-restore
 
-      - name: Lint
-        run: npm run lint
+      - name: Publish single-file Windows app
+        run: dotnet publish DropshippingTools.Native\DropshippingTools.Native.csproj --configuration Release --framework net8.0-windows --runtime win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true --output out\publish\win-x64
 
-      - name: Test
-        run: npm test
-
-      - name: Build Windows distributables
-        run: npm run make
-
-      - name: Stage update feed assets
-        run: node scripts/stage-update-feed.cjs
+      - name: Stage update feed
+        shell: pwsh
+        run: ./scripts/stage-update-feed.ps1
 
       - name: Generate download page
-        run: node scripts/generate-download-page.cjs
+        shell: pwsh
+        run: ./scripts/generate-download-page.ps1
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
 
       - name: Assemble GitHub Pages artifact
+        shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           $pagesArtifactDir = Join-Path (Resolve-Path "out").Path "pages-publish"
@@ -69,7 +64,7 @@ jobs:
           $siteSource = (Resolve-Path "out/pages-site").Path
           $targetFeedDir = Join-Path $pagesArtifactDir "updates/win/x64"
 
-          if (Test-Path $pagesArtifactDir) {
+          if (Test-Path -LiteralPath $pagesArtifactDir) {
             Remove-Item -LiteralPath $pagesArtifactDir -Recurse -Force
           }
 

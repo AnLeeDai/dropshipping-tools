@@ -1,0 +1,1 @@
+dotnet build .\DropshippingTools.Native\DropshippingTools.Native.csproj
