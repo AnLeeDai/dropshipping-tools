@@ -55,7 +55,7 @@ internal sealed class EtsyPdfParser
         var orderId = GetOrderId(lines, startIndex, endIndex);
         var shipTo = GetShipTo(lines, startIndex, endIndex);
 
-        if (string.IsNullOrWhiteSpace(orderId) || string.IsNullOrWhiteSpace(shipTo))
+        if (string.IsNullOrWhiteSpace(orderId) || string.IsNullOrWhiteSpace(shipTo.DisplayValue))
         {
             return;
         }
@@ -89,7 +89,7 @@ internal sealed class EtsyPdfParser
         return false;
     }
 
-    private static string GetShipTo(IReadOnlyList<string> lines, int startIndex, int endIndex)
+    private static ParsedShippingAddress GetShipTo(IReadOnlyList<string> lines, int startIndex, int endIndex)
     {
         var addressStartIndex = -1;
         for (var index = startIndex; index < endIndex; index += 1)
@@ -103,7 +103,7 @@ internal sealed class EtsyPdfParser
 
         if (addressStartIndex < 0)
         {
-            return string.Empty;
+            return new ParsedShippingAddress();
         }
 
         var addressLines = new List<string>();
@@ -121,7 +121,7 @@ internal sealed class EtsyPdfParser
             }
         }
 
-        return string.Join(", ", addressLines);
+        return ShippingAddressParser.Parse(addressLines);
     }
 
     private static void ParseItems(
@@ -129,7 +129,7 @@ internal sealed class EtsyPdfParser
         int startIndex,
         int endIndex,
         string orderId,
-        string shipTo,
+        ParsedShippingAddress shipTo,
         List<ParsedEtsyRow> rows)
     {
         var skuIndex = FindNextSkuIndex(lines, startIndex, endIndex, startIndex);
@@ -154,7 +154,7 @@ internal sealed class EtsyPdfParser
         int skuIndex,
         int itemEndIndex,
         string orderId,
-        string shipTo)
+        ParsedShippingAddress shipTo)
     {
         var sku = GetSku(lines[skuIndex]);
         if (string.IsNullOrWhiteSpace(sku))
@@ -241,7 +241,15 @@ internal sealed class EtsyPdfParser
         return new ParsedEtsyRow
         {
             OrderId = orderId,
-            ShipTo = shipTo,
+            ShipTo = shipTo.DisplayValue,
+            ShipToName = shipTo.RecipientName,
+            ShipToFullAddress = shipTo.FullAddress,
+            ShipToAddressLine1 = shipTo.AddressLine1,
+            ShipToAddressLine2 = shipTo.AddressLine2,
+            ShipToCity = shipTo.City,
+            ShipToState = shipTo.StateOrProvince,
+            ShipToPostalCode = shipTo.PostalCode,
+            ShipToCountry = shipTo.Country,
             Title = title,
             Sku = sku,
             Variation = string.Join(" | ", variationParts),

@@ -9,6 +9,10 @@ namespace DropshippingTools.Native.Features.EtsyPdf;
 
 internal sealed class EtsyPdfToolPage : UserControl
 {
+    private const int DefaultQueuePanelHeight = 180;
+    private const int MinimumQueuePanelHeight = 140;
+    private const int MinimumResultsPanelHeight = 320;
+
     private readonly ToolHostContext _context;
     private readonly EtsyPdfParser _etsyPdfParser;
     private readonly BindingSource _resultsBindingSource = new();
@@ -16,7 +20,9 @@ internal sealed class EtsyPdfToolPage : UserControl
     private readonly List<QueuedPdfFile> _queuedFiles = [];
 
     private bool _isProcessingQueue;
+    private bool _hasAppliedInitialSplitLayout;
 
+    private SplitContainer _contentSplitContainer = null!;
     private ListView _queueListView = null!;
     private DataGridView _resultsGrid = null!;
     private Button _addPdfButton = null!;
@@ -36,6 +42,8 @@ internal sealed class EtsyPdfToolPage : UserControl
         AllowDrop = true;
         DragEnter += HandlePdfDragEnter;
         DragDrop += HandlePdfDragDrop;
+        Load += HandlePageLoad;
+        SizeChanged += HandlePageSizeChanged;
 
         InitializeLayout();
         RefreshQueueView();
@@ -91,11 +99,11 @@ internal sealed class EtsyPdfToolPage : UserControl
             _copyResultsButton,
         ]);
 
-        var splitContainer = new SplitContainer
+        _contentSplitContainer = new SplitContainer
         {
             Dock = DockStyle.Fill,
             Orientation = Orientation.Horizontal,
-            SplitterDistance = 250,
+            FixedPanel = FixedPanel.Panel1,
         };
 
         var queueLayout = new TableLayoutPanel
@@ -136,7 +144,7 @@ internal sealed class EtsyPdfToolPage : UserControl
 
         queueLayout.Controls.Add(queueLabel, 0, 0);
         queueLayout.Controls.Add(_queueListView, 0, 1);
-        splitContainer.Panel1.Controls.Add(queueLayout);
+        _contentSplitContainer.Panel1.Controls.Add(queueLayout);
 
         var resultsLayout = new TableLayoutPanel
         {
@@ -165,33 +173,52 @@ internal sealed class EtsyPdfToolPage : UserControl
             MultiSelect = true,
             SelectionMode = DataGridViewSelectionMode.FullRowSelect,
             AutoGenerateColumns = false,
-            AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+            AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None,
             RowHeadersVisible = false,
             DataSource = _resultsBindingSource,
         };
 
         _resultsGrid.Columns.Add(CreateTextColumn("OrderId", "Order ID", 90));
-        _resultsGrid.Columns.Add(CreateTextColumn("ShipTo", "Ship To", 180));
-        _resultsGrid.Columns.Add(CreateTextColumn("Title", "Title", 180));
-        _resultsGrid.Columns.Add(CreateTextColumn("Sku", "SKU", 90));
-        _resultsGrid.Columns.Add(CreateTextColumn("Variation", "Variation", 130));
-        _resultsGrid.Columns.Add(CreateTextColumn("Personalization", "Personalization", 160));
+        _resultsGrid.Columns.Add(CreateTextColumn("ShipTo", "Ship to", 260));
+        _resultsGrid.Columns.Add(CreateTextColumn("Title", "Title", 220));
+        _resultsGrid.Columns.Add(CreateTextColumn("Sku", "SKU", 110));
+        _resultsGrid.Columns.Add(CreateTextColumn("Variation", "Variation", 150));
+        _resultsGrid.Columns.Add(CreateTextColumn("Personalization", "Personalization", 180));
         _resultsGrid.Columns.Add(CreateTextColumn("Quantity", "Qty", 60));
 
-        var priceColumn = CreateTextColumn("UnitPrice", "Unit Price", 70);
+        var priceColumn = CreateTextColumn("UnitPrice", "Price", 80);
         priceColumn.DefaultCellStyle.Format = "0.00";
         _resultsGrid.Columns.Add(priceColumn);
+        _resultsGrid.Columns.Add(CreateTextColumn("ShipToName", "Name", 150));
+        _resultsGrid.Columns.Add(CreateTextColumn("ShipToFullAddress", "Address", 280));
+        _resultsGrid.Columns.Add(CreateTextColumn("ShipToAddressLine1", "Street 1", 180));
+        _resultsGrid.Columns.Add(CreateTextColumn("ShipToAddressLine2", "Street 2", 180));
+        _resultsGrid.Columns.Add(CreateTextColumn("ShipToCity", "Ship City", 120));
+        _resultsGrid.Columns.Add(CreateTextColumn("ShipToState", "Ship State", 90));
+        _resultsGrid.Columns.Add(CreateTextColumn("ShipToPostalCode", "Ship Zipcode", 110));
+        _resultsGrid.Columns.Add(CreateTextColumn("ShipToCountry", "Ship Country", 130));
+        _resultsGrid.Columns.Add(CreateTextColumn("ShipToPhone", "Tel", 120));
 
         resultsLayout.Controls.Add(resultsLabel, 0, 0);
         resultsLayout.Controls.Add(_resultsGrid, 0, 1);
-        splitContainer.Panel2.Controls.Add(resultsLayout);
+        _contentSplitContainer.Panel2.Controls.Add(resultsLayout);
 
         layout.Controls.Add(instructionsLabel, 0, 0);
         layout.Controls.Add(actionsPanel, 0, 1);
-        layout.Controls.Add(splitContainer, 0, 2);
+        layout.Controls.Add(_contentSplitContainer, 0, 2);
 
         Controls.Add(layout);
         ResizeQueueColumns();
+    }
+
+    private void HandlePageLoad(object? sender, EventArgs e)
+    {
+        EnsureSplitLayout();
+    }
+
+    private void HandlePageSizeChanged(object? sender, EventArgs e)
+    {
+        EnsureSplitLayout();
     }
 
     private void HandleAddPdfFiles(object? sender, EventArgs e)
@@ -509,6 +536,34 @@ internal sealed class EtsyPdfToolPage : UserControl
         return Math.Min(Math.Max(1, workerSlots), _queuedFiles.Count);
     }
 
+    private void EnsureSplitLayout()
+    {
+        if (_hasAppliedInitialSplitLayout || _contentSplitContainer.IsDisposed)
+        {
+            return;
+        }
+
+        var availableHeight = _contentSplitContainer.Height - _contentSplitContainer.SplitterWidth;
+        if (availableHeight <= 0)
+        {
+            return;
+        }
+
+        var queueMinSize = Math.Min(MinimumQueuePanelHeight, Math.Max(0, availableHeight - 1));
+        var resultsMinSize = Math.Min(MinimumResultsPanelHeight, Math.Max(0, availableHeight - queueMinSize));
+        var maxSplitterDistance = Math.Max(queueMinSize, availableHeight - resultsMinSize);
+        var desiredSplitterDistance = Math.Clamp(DefaultQueuePanelHeight, queueMinSize, maxSplitterDistance);
+
+        _contentSplitContainer.Panel1MinSize = queueMinSize;
+        _contentSplitContainer.Panel2MinSize = resultsMinSize;
+        _contentSplitContainer.SplitterDistance = desiredSplitterDistance;
+
+        if (availableHeight >= DefaultQueuePanelHeight + MinimumResultsPanelHeight)
+        {
+            _hasAppliedInitialSplitLayout = true;
+        }
+    }
+
     private static Button CreateActionButton(string text, EventHandler onClick)
     {
         var button = new Button
@@ -548,14 +603,14 @@ internal sealed class EtsyPdfToolPage : UserControl
         _queueListView.Columns[4].Width = messageWidth;
     }
 
-    private static DataGridViewTextBoxColumn CreateTextColumn(string propertyName, string headerText, int fillWeight)
+    private static DataGridViewTextBoxColumn CreateTextColumn(string propertyName, string headerText, int width)
     {
         return new DataGridViewTextBoxColumn
         {
             DataPropertyName = propertyName,
             HeaderText = headerText,
-            AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-            FillWeight = fillWeight,
+            AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
+            Width = width,
             SortMode = DataGridViewColumnSortMode.NotSortable,
         };
     }

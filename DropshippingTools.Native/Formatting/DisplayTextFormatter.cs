@@ -18,7 +18,16 @@ internal static class DisplayTextFormatter
                 SanitizeClipboardCell(row.Variation),
                 SanitizeClipboardCell(row.Personalization),
                 row.Quantity.ToString(CultureInfo.InvariantCulture),
-                row.UnitPrice.ToString("0.00", CultureInfo.InvariantCulture))));
+                row.UnitPrice.ToString("0.00", CultureInfo.InvariantCulture),
+                SanitizeClipboardCell(row.ShipToName),
+                SanitizeClipboardCell(row.ShipToFullAddress),
+                SanitizeClipboardCell(row.ShipToAddressLine1),
+                SanitizeClipboardCell(row.ShipToAddressLine2),
+                SanitizeClipboardCell(row.ShipToCity),
+                SanitizeClipboardCell(row.ShipToState),
+                SanitizeClipboardCell(row.ShipToPostalCode),
+                SanitizeClipboardCell(row.ShipToCountry),
+                SanitizeClipboardCell(row.ShipToPhone))));
     }
 
     public static string FormatFileSize(long sizeInBytes)
